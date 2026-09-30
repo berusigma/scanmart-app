@@ -266,9 +266,13 @@
 
           <!-- Bottom Control Bar -->
           <div class="scanner-controls">
-            <button class="btn-manual-input" id="btnOpenManualScan">
+            <button class="btn-snap-photo" id="btnSnapProductFromCamera" title="Jepret foto produk & tambah tanpa barcode">
+              <i class="fa-solid fa-camera"></i>
+              <span>Foto Produk & Tambah</span>
+            </button>
+            <button class="btn-manual-input" id="btnOpenManualScan" title="Ketik kode barcode manual">
               <i class="fa-solid fa-keyboard"></i>
-              <span>Ketik Barcode Manual</span>
+              <span>Ketik Kode</span>
             </button>
           </div>
         </div>
@@ -573,12 +577,15 @@
           <input type="hidden" id="formImageData" value="" />
         </div>
 
-        <!-- Barcode Field with Scan Button -->
+        <!-- Barcode Field with Auto Generate & Scan Buttons -->
         <div class="form-group">
           <label for="formBarcode">Kode Barcode <span class="required">*</span></label>
           <div class="input-with-button">
-            <input type="text" id="formBarcode" placeholder="Contoh: 8992741987012" required />
-            <button type="button" class="btn-input-scan" id="btnScanForForm" title="Scan Barcode">
+            <input type="text" id="formBarcode" placeholder="Scan / Kode Otomatis" required />
+            <button type="button" class="btn-input-auto" id="btnAutoGenerateBarcode" title="Buat Kode Otomatis (Produk Tanpa Barcode)">
+              <i class="fa-solid fa-wand-magic-sparkles"></i> Auto Kode
+            </button>
+            <button type="button" class="btn-input-scan" id="btnScanForForm" title="Scan Barcode Kamera">
               <i class="fa-solid fa-barcode"></i>
             </button>
           </div>

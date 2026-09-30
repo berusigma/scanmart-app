@@ -853,6 +853,39 @@ function compressProductImage(file, callback) {
   reader.readAsDataURL(file);
 }
 
+function generateAutoBarcode() {
+  return "SM-" + Date.now().toString().slice(-8);
+}
+
+function snapProductPhotoFromCamera() {
+  let capturedPhoto = "";
+  try {
+    const videoEl = document.querySelector("#html5QrcodeReader video");
+    if (videoEl && videoEl.videoWidth > 0) {
+      const canvas = document.createElement("canvas");
+      const maxDim = 600;
+      let w = videoEl.videoWidth;
+      let h = videoEl.videoHeight;
+      if (w > h) {
+        if (w > maxDim) { h = Math.round((h * maxDim) / w); w = maxDim; }
+      } else {
+        if (h > maxDim) { w = Math.round((w * maxDim) / h); h = maxDim; }
+      }
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(videoEl, 0, 0, w, h);
+      capturedPhoto = canvas.toDataURL("image/jpeg", 0.75);
+    }
+  } catch (e) {
+    console.warn("Snap camera frame error:", e);
+  }
+
+  const autoCode = generateAutoBarcode();
+  stopCameraScanner();
+  openProductForm({ barcode: autoCode, image: capturedPhoto });
+}
+
 function formatRupiah(number) {
   return new Intl.NumberFormat("id-ID", {
     style: "currency",
@@ -917,6 +950,17 @@ function bindEventListeners() {
 
   if (getEl("btnOpenManualScan")) {
     getEl("btnOpenManualScan").addEventListener("click", () => openModal(getEl("modalManualInput")));
+  }
+
+  if (getEl("btnSnapProductFromCamera")) {
+    getEl("btnSnapProductFromCamera").addEventListener("click", snapProductPhotoFromCamera);
+  }
+
+  if (getEl("btnAutoGenerateBarcode")) {
+    getEl("btnAutoGenerateBarcode").addEventListener("click", () => {
+      const input = getEl("formBarcode");
+      if (input) input.value = generateAutoBarcode();
+    });
   }
 
   if (getEl("btnSubmitManualScan")) {
