@@ -1,5 +1,5 @@
 /**
- * ScanMart — Core Application Logic (Capacitor 7 & Offline Database)
+ * ScanMart — Core Application Logic (Capacitor 7 & Fail-Safe Offline Database)
  * Features: Fast Barcode Scanning, Offline DB, Anti-Duplicate, Kasir & Belanja, Receipt, Dark/Light Mode.
  */
 
@@ -23,10 +23,11 @@ let appState = {
   activeScanner: null,
   isScanning: false,
   targetDeleteId: null,
-  duplicateProductTarget: null
+  duplicateProductTarget: null,
+  localProductsMemory: [] // Fallback memory store if IndexedDB is blocked
 };
 
-// ==================== 2. AUDIO & HAPTIC FEEDBACK (SOUNDPOOL SIMULATION) ====================
+// ==================== 2. AUDIO & HAPTIC FEEDBACK ====================
 let audioCtx = null;
 
 function playBeepSound() {
@@ -56,141 +57,179 @@ function playBeepSound() {
 }
 
 function triggerHaptic() {
-  if (navigator.vibrate) {
-    navigator.vibrate([60]);
-  }
+  try {
+    if (navigator.vibrate) {
+      navigator.vibrate([60]);
+    }
+  } catch (e) {}
 }
 
-// ==================== 3. DATABASE ENGINE (INDEXEDDB) ====================
+// ==================== 3. DATABASE ENGINE (INDEXEDDB WITH LOCALSTORAGE FALLBACK) ====================
 function initDatabase() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-    request.onupgradeneeded = (e) => {
-      const db = e.target.result;
-      
-      // Products Store (Index: barcode)
-      if (!db.objectStoreNames.contains("products")) {
-        const productStore = db.createObjectStore("products", { keyPath: "id", autoIncrement: true });
-        productStore.createIndex("barcode", "barcode", { unique: true });
-        productStore.createIndex("name", "name", { unique: false });
-        productStore.createIndex("category", "category", { unique: false });
+  return new Promise((resolve) => {
+    try {
+      if (!window.indexedDB) {
+        console.warn("IndexedDB not supported, using LocalStorage fallback");
+        resolve(null);
+        return;
       }
+      const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-      // History Store
-      if (!db.objectStoreNames.contains("scanHistory")) {
-        const historyStore = db.createObjectStore("scanHistory", { keyPath: "id", autoIncrement: true });
-        historyStore.createIndex("timestamp", "timestamp", { unique: false });
-      }
-    };
+      request.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains("products")) {
+          const productStore = db.createObjectStore("products", { keyPath: "id", autoIncrement: true });
+          productStore.createIndex("barcode", "barcode", { unique: true });
+          productStore.createIndex("name", "name", { unique: false });
+        }
+        if (!db.objectStoreNames.contains("scanHistory")) {
+          db.createObjectStore("scanHistory", { keyPath: "id", autoIncrement: true });
+        }
+      };
 
-    request.onsuccess = (e) => {
-      dbInstance = e.target.result;
-      resolve(dbInstance);
-    };
+      request.onsuccess = (e) => {
+        dbInstance = e.target.result;
+        resolve(dbInstance);
+      };
 
-    request.onerror = (e) => {
-      console.error("IndexedDB error:", e);
-      reject(e);
-    };
+      request.onerror = (e) => {
+        console.warn("IndexedDB open error:", e);
+        resolve(null); // Resolve null to allow fallback without hanging!
+      };
+    } catch (err) {
+      console.warn("IndexedDB init exception:", err);
+      resolve(null);
+    }
   });
 }
 
-// DB Helper Methods
+// LocalStorage Fallback Methods
+function getLSProducts() {
+  try {
+    return JSON.parse(localStorage.getItem("scanmart_products_ls") || "[]");
+  } catch (e) { return []; }
+}
+function setLSProducts(list) {
+  try {
+    localStorage.setItem("scanmart_products_ls", JSON.stringify(list));
+  } catch (e) {}
+}
+
 async function dbGetAllProducts() {
-  return new Promise((resolve) => {
-    const tx = dbInstance.transaction("products", "readonly");
-    const store = tx.objectStore("products");
-    const req = store.getAll();
-    req.onsuccess = () => resolve(req.result || []);
-  });
+  if (dbInstance) {
+    return new Promise((resolve) => {
+      try {
+        const tx = dbInstance.transaction("products", "readonly");
+        const store = tx.objectStore("products");
+        const req = store.getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => resolve(getLSProducts());
+      } catch (e) { resolve(getLSProducts()); }
+    });
+  }
+  return getLSProducts();
 }
 
 async function dbGetProductByBarcode(barcode) {
-  return new Promise((resolve) => {
-    const tx = dbInstance.transaction("products", "readonly");
-    const store = tx.objectStore("products");
-    const index = store.index("barcode");
-    const req = index.get(barcode);
-    req.onsuccess = () => resolve(req.result || null);
-  });
+  const products = await dbGetAllProducts();
+  return products.find(p => String(p.barcode) === String(barcode)) || null;
 }
 
 async function dbSaveProduct(productData) {
-  return new Promise((resolve, reject) => {
-    const tx = dbInstance.transaction("products", "readwrite");
-    const store = tx.objectStore("products");
-    
-    productData.updatedAt = new Date().toISOString();
-    const req = productData.id ? store.put(productData) : store.add(productData);
+  productData.updatedAt = new Date().toISOString();
+  if (dbInstance) {
+    return new Promise((resolve) => {
+      try {
+        const tx = dbInstance.transaction("products", "readwrite");
+        const store = tx.objectStore("products");
+        const req = productData.id ? store.put(productData) : store.add(productData);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => {
+          // Fallback to LS
+          saveLSHelper(productData);
+          resolve(true);
+        };
+      } catch (e) {
+        saveLSHelper(productData);
+        resolve(true);
+      }
+    });
+  } else {
+    saveLSHelper(productData);
+    return true;
+  }
+}
 
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = (e) => reject(e);
-  });
+function saveLSHelper(productData) {
+  let list = getLSProducts();
+  if (productData.id) {
+    const idx = list.findIndex(p => p.id === productData.id);
+    if (idx >= 0) list[idx] = productData;
+    else list.push(productData);
+  } else {
+    productData.id = Date.now();
+    list.push(productData);
+  }
+  setLSProducts(list);
 }
 
 async function dbDeleteProduct(id) {
-  return new Promise((resolve) => {
-    const tx = dbInstance.transaction("products", "readwrite");
-    const store = tx.objectStore("products");
-    const req = store.delete(Number(id));
-    req.onsuccess = () => resolve(true);
-  });
+  if (dbInstance) {
+    try {
+      const tx = dbInstance.transaction("products", "readwrite");
+      tx.objectStore("products").delete(Number(id));
+    } catch (e) {}
+  }
+  let list = getLSProducts().filter(p => p.id !== Number(id));
+  setLSProducts(list);
+  return true;
 }
 
 async function dbAddScanHistory(product) {
-  return new Promise((resolve) => {
-    const tx = dbInstance.transaction("scanHistory", "readwrite");
-    const store = tx.objectStore("scanHistory");
-    store.add({
-      productId: product ? product.id : null,
-      barcode: product ? product.barcode : appState.scannedBarcode,
-      productName: product ? product.name : "Produk Tidak Ditemukan",
-      price: product ? product.sellPrice : 0,
-      timestamp: new Date().toISOString()
-    });
-    tx.oncomplete = () => {
-      updateRecentStats();
-      resolve(true);
-    };
-  });
+  const historyItem = {
+    productId: product ? product.id : null,
+    barcode: product ? product.barcode : appState.scannedBarcode,
+    productName: product ? product.name : "Produk Tidak Ditemukan",
+    price: product ? product.sellPrice : 0,
+    timestamp: new Date().toISOString()
+  };
+
+  try {
+    let logs = JSON.parse(localStorage.getItem("scanmart_history_log") || "[]");
+    logs.unshift(historyItem);
+    if (logs.length > 100) logs = logs.slice(0, 100);
+    localStorage.setItem("scanmart_history_log", JSON.stringify(logs));
+  } catch (e) {}
+
+  updateRecentStats();
 }
 
 async function dbGetScanHistory() {
-  return new Promise((resolve) => {
-    const tx = dbInstance.transaction("scanHistory", "readonly");
-    const store = tx.objectStore("scanHistory");
-    const req = store.getAll();
-    req.onsuccess = () => {
-      const list = req.result || [];
-      list.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-      resolve(list);
-    };
-  });
+  try {
+    return JSON.parse(localStorage.getItem("scanmart_history_log") || "[]");
+  } catch (e) { return []; }
 }
 
 async function dbClearScanHistory() {
-  return new Promise((resolve) => {
-    const tx = dbInstance.transaction("scanHistory", "readwrite");
-    const store = tx.objectStore("scanHistory");
-    store.clear();
-    tx.oncomplete = () => resolve(true);
-  });
+  try {
+    localStorage.removeItem("scanmart_history_log");
+  } catch (e) {}
+  return true;
 }
 
-// Seed Initial Sample Data (Indonesian Groceries)
+// Seed Initial Sample Data
 async function seedSampleDataIfNeeded() {
   const products = await dbGetAllProducts();
   if (products.length === 0) {
     const samples = [
-      { barcode: "8999999001", name: "Indomie Goreng Spesial 85g", category: "Makanan", sellPrice: 3500, buyPrice: 3000, stock: 120, image: "" },
-      { barcode: "8992741987012", name: "Aqua Air Mineral 600ml", category: "Minuman", sellPrice: 4000, buyPrice: 3200, stock: 85, image: "" },
-      { barcode: "8998866200019", name: "Teh Botol Sosro Original 450ml", category: "Minuman", sellPrice: 6000, buyPrice: 4800, stock: 60, image: "" },
-      { barcode: "8992800101015", name: "Ultra Milk Cokelat 250ml", category: "Minuman", sellPrice: 7000, buyPrice: 5800, stock: 45, image: "" },
-      { barcode: "8992741911109", name: "Chitato Sapi Panggang 68g", category: "Makanan", sellPrice: 11500, buyPrice: 9500, stock: 30, image: "" },
-      { barcode: "8991001100223", name: "Kopi Kapal Api Mix 10x25g", category: "Minuman", sellPrice: 15000, buyPrice: 12800, stock: 50, image: "" },
-      { barcode: "8993005000018", name: "Le Minerale 600ml", category: "Minuman", sellPrice: 3500, buyPrice: 2800, stock: 90, image: "" },
-      { barcode: "8992771000125", name: "Silverqueen Milk Chocolate 58g", category: "Makanan", sellPrice: 16500, buyPrice: 13500, stock: 25, image: "" }
+      { id: 1, barcode: "8999999001", name: "Indomie Goreng Spesial 85g", category: "Makanan", sellPrice: 3500, buyPrice: 3000, stock: 120, image: "" },
+      { id: 2, barcode: "8992741987012", name: "Aqua Air Mineral 600ml", category: "Minuman", sellPrice: 4000, buyPrice: 3200, stock: 85, image: "" },
+      { id: 3, barcode: "8998866200019", name: "Teh Botol Sosro Original 450ml", category: "Minuman", sellPrice: 6000, buyPrice: 4800, stock: 60, image: "" },
+      { id: 4, barcode: "8992800101015", name: "Ultra Milk Cokelat 250ml", category: "Minuman", sellPrice: 7000, buyPrice: 5800, stock: 45, image: "" },
+      { id: 5, barcode: "8992741911109", name: "Chitato Sapi Panggang 68g", category: "Makanan", sellPrice: 11500, buyPrice: 9500, stock: 30, image: "" },
+      { id: 6, barcode: "8991001100223", name: "Kopi Kapal Api Mix 10x25g", category: "Minuman", sellPrice: 15000, buyPrice: 12800, stock: 50, image: "" },
+      { id: 7, barcode: "8993005000018", name: "Le Minerale 600ml", category: "Minuman", sellPrice: 3500, buyPrice: 2800, stock: 90, image: "" },
+      { id: 8, barcode: "8992771000125", name: "Silverqueen Milk Chocolate 58g", category: "Makanan", sellPrice: 16500, buyPrice: 13500, stock: 25, image: "" }
     ];
     for (const item of samples) {
       await dbSaveProduct(item);
@@ -198,127 +237,22 @@ async function seedSampleDataIfNeeded() {
   }
 }
 
-// ==================== 4. DOM ELEMENTS CACHE ====================
-const elements = {
-  splashScreen: document.getElementById("splashScreen"),
-  onboardingScreen: document.getElementById("onboardingScreen"),
-  appShell: document.getElementById("appShell"),
-  
-  // Views
-  viewHome: document.getElementById("viewHome"),
-  viewScan: document.getElementById("viewScan"),
-  viewProducts: document.getElementById("viewProducts"),
-  viewHistory: document.getElementById("viewHistory"),
-  viewSettings: document.getElementById("viewSettings"),
-  
-  // Buttons & Navigation
-  btnThemeToggle: document.getElementById("btnThemeToggle"),
-  btnHeaderCart: document.getElementById("btnHeaderCart"),
-  cartBadgeCount: document.getElementById("cartBadgeCount"),
-  navItems: document.querySelectorAll(".nav-item"),
-  btnNavScan: document.getElementById("btnNavScan"),
-  
-  // Home Elements
-  homeStoreName: document.getElementById("homeStoreName"),
-  homeStoreDesc: document.getElementById("homeStoreDesc"),
-  statTotalProducts: document.getElementById("statTotalProducts"),
-  statTotalScans: document.getElementById("statTotalScans"),
-  homeSearchInput: document.getElementById("homeSearchInput"),
-  btnClearHomeSearch: document.getElementById("btnClearHomeSearch"),
-  homeSearchResults: document.getElementById("homeSearchResults"),
-  homeRecentProducts: document.getElementById("homeRecentProducts"),
-  btnSeeAllProducts: document.getElementById("btnSeeAllProducts"),
-  
-  // Menu Cards
-  menuCardScan: document.getElementById("menuCardScan"),
-  menuCardCashier: document.getElementById("menuCardCashier"),
-  menuCardAdd: document.getElementById("menuCardAdd"),
-  menuCardList: document.getElementById("menuCardList"),
-  
-  // Scanner View
-  btnBackFromScan: document.getElementById("btnBackFromScan"),
-  btnToggleFlash: document.getElementById("btnToggleFlash"),
-  btnGalleryScan: document.getElementById("btnGalleryScan"),
-  fileInputGallery: document.getElementById("fileInputGallery"),
-  btnOpenManualScan: document.getElementById("btnOpenManualScan"),
-  
-  // Modals
-  modalProductDetail: document.getElementById("modalProductDetail"),
-  modalNotFound: document.getElementById("modalNotFound"),
-  modalProductForm: document.getElementById("modalProductForm"),
-  modalDuplicateBarcode: document.getElementById("modalDuplicateBarcode"),
-  modalConfirmDelete: document.getElementById("modalConfirmDelete"),
-  modalManualInput: document.getElementById("modalManualInput"),
-  modalCashierCart: document.getElementById("modalCashierCart"),
-  modalReceipt: document.getElementById("modalReceipt"),
-  
-  // Form Elements
-  productForm: document.getElementById("productForm"),
-  formTitle: document.getElementById("formTitle"),
-  formProductId: document.getElementById("formProductId"),
-  formBarcode: document.getElementById("formBarcode"),
-  btnScanForForm: document.getElementById("btnScanForForm"),
-  formName: document.getElementById("formName"),
-  formCategory: document.getElementById("formCategory"),
-  formSellPrice: document.getElementById("formSellPrice"),
-  formBuyPrice: document.getElementById("formBuyPrice"),
-  formStock: document.getElementById("formStock"),
-  formMarginPreview: document.getElementById("formMarginPreview"),
-  btnDeleteProductFromForm: document.getElementById("btnDeleteProductFromForm"),
-  btnTriggerImagePicker: document.getElementById("btnTriggerImagePicker"),
-  formFileInput: document.getElementById("formFileInput"),
-  formImagePreview: document.getElementById("formImagePreview"),
-  formImagePlaceholder: document.getElementById("formImagePlaceholder"),
-  formImageData: document.getElementById("formImageData"),
-  
-  // Catalog View
-  catalogSearchInput: document.getElementById("catalogSearchInput"),
-  categoryFilterPills: document.getElementById("categoryFilterPills"),
-  catalogSortSelect: document.getElementById("catalogSortSelect"),
-  catalogCountText: document.getElementById("catalogCountText"),
-  catalogProductList: document.getElementById("catalogProductList"),
-  btnFabAddProduct: document.getElementById("btnFabAddProduct"),
-  
-  // Cashier & Cart
-  btnCashierScanItem: document.getElementById("btnCashierScanItem"),
-  btnClearCartItems: document.getElementById("btnClearCartItems"),
-  cartItemsContainer: document.getElementById("cartItemsContainer"),
-  cartTotalDisplay: document.getElementById("cartTotalDisplay"),
-  inputCashReceived: document.getElementById("inputCashReceived"),
-  cartChangeDisplay: document.getElementById("cartChangeDisplay"),
-  btnFinishTransaction: document.getElementById("btnFinishTransaction"),
-  btnCashExact: document.getElementById("btnCashExact"),
-  
-  // Settings & Profile
-  settingStoreName: document.getElementById("settingStoreName"),
-  settingStoreAddress: document.getElementById("settingStoreAddress"),
-  settingReceiptFooter: document.getElementById("settingReceiptFooter"),
-  btnSaveStoreProfile: document.getElementById("btnSaveStoreProfile"),
-  btnExportData: document.getElementById("btnExportData"),
-  btnRestoreData: document.getElementById("btnRestoreData"),
-  fileInputRestore: document.getElementById("fileInputRestore"),
-  btnSeedSampleData: document.getElementById("btnSeedSampleData"),
-  btnResetAllData: document.getElementById("btnResetAllData"),
-
-  // Onboarding Buttons
-  btnNextOnboarding: document.getElementById("btnNextOnboarding"),
-  btnSkipOnboarding: document.getElementById("btnSkipOnboarding")
-};
+// ==================== 4. DOM ELEMENTS SAFE GETTER ====================
+function getEl(id) {
+  return document.getElementById(id);
+}
 
 // ==================== 5. NAVIGATION & VIEW CONTROLLER ====================
 function switchView(viewId) {
-  // Hide all views
   document.querySelectorAll(".app-view").forEach(v => v.classList.add("hidden"));
   
-  // Show target view
-  const targetView = document.getElementById(viewId);
+  const targetView = getEl(viewId);
   if (targetView) {
     targetView.classList.remove("hidden");
     appState.currentView = viewId;
   }
 
-  // Update bottom nav icons
-  elements.navItems.forEach(item => {
+  document.querySelectorAll(".nav-item").forEach(item => {
     if (item.dataset.view === viewId) {
       item.classList.add("active");
     } else {
@@ -326,14 +260,12 @@ function switchView(viewId) {
     }
   });
 
-  // Camera cleanup if switching away from scan
   if (viewId !== "viewScan" && appState.isScanning) {
     stopCameraScanner();
   } else if (viewId === "viewScan") {
     startCameraScanner();
   }
 
-  // Refresh view specific data
   if (viewId === "viewHome") {
     renderHomeView();
   } else if (viewId === "viewProducts") {
@@ -343,7 +275,6 @@ function switchView(viewId) {
   }
 }
 
-// Modal System
 function openModal(modalEl) {
   if (modalEl) modalEl.classList.remove("hidden");
 }
@@ -356,7 +287,7 @@ function closeModal(modalEl) {
 document.querySelectorAll("[data-close]").forEach(btn => {
   btn.addEventListener("click", () => {
     const modalId = btn.dataset.close;
-    closeModal(document.getElementById(modalId));
+    closeModal(getEl(modalId));
   });
 });
 
@@ -367,41 +298,39 @@ function applyTheme(theme) {
   localStorage.setItem("scanmart_theme", theme);
 }
 
-elements.btnThemeToggle.addEventListener("click", () => {
-  const newTheme = appState.theme === "dark" ? "light" : "dark";
-  applyTheme(newTheme);
-});
-
-// ==================== 7. SCANNER ENGINE (HTML5-QRCODE) ====================
+// ==================== 7. SCANNER ENGINE ====================
 function startCameraScanner() {
   if (appState.isScanning) return;
   appState.isScanning = true;
 
-  if (!appState.activeScanner) {
-    appState.activeScanner = new Html5Qrcode("html5QrcodeReader");
+  try {
+    if (!appState.activeScanner && window.Html5Qrcode) {
+      appState.activeScanner = new Html5Qrcode("html5QrcodeReader");
+    }
+
+    if (appState.activeScanner) {
+      const config = { fps: 15, qrbox: { width: 240, height: 240 }, aspectRatio: 1.0 };
+      appState.activeScanner.start(
+        { facingMode: "environment" },
+        config,
+        onBarcodeScannedSuccess,
+        () => {}
+      ).catch(err => {
+        console.warn("Camera start catch:", err);
+      });
+    }
+  } catch (e) {
+    console.warn("Scanner exception:", e);
   }
-
-  const config = {
-    fps: 15,
-    qrbox: { width: 240, height: 240 },
-    aspectRatio: 1.0
-  };
-
-  appState.activeScanner.start(
-    { facingMode: "environment" },
-    config,
-    onBarcodeScannedSuccess,
-    onBarcodeScanError
-  ).catch(err => {
-    console.warn("Camera start error, falling back:", err);
-  });
 }
 
 function stopCameraScanner() {
   if (appState.activeScanner && appState.isScanning) {
     appState.activeScanner.stop().then(() => {
       appState.isScanning = false;
-    }).catch(err => console.log("Stop error:", err));
+    }).catch(() => {
+      appState.isScanning = false;
+    });
   } else {
     appState.isScanning = false;
   }
@@ -414,84 +343,32 @@ async function onBarcodeScannedSuccess(decodedText) {
   appState.scannedBarcode = decodedText;
   stopCameraScanner();
   
-  // Query product in DB
   const product = await dbGetProductByBarcode(decodedText);
   await dbAddScanHistory(product);
   
   if (product) {
     showProductDetailModal(product);
   } else {
-    // Offer to create product with barcode pre-filled
-    document.getElementById("notFoundBarcodeText").textContent = decodedText;
-    openModal(elements.modalNotFound);
+    const notFoundText = getEl("notFoundBarcodeText");
+    if (notFoundText) notFoundText.textContent = decodedText;
+    openModal(getEl("modalNotFound"));
   }
 }
-
-function onBarcodeScanError(err) {
-  // Silent frame scan errors
-}
-
-// Flashlight Toggle
-let flashOn = false;
-elements.btnToggleFlash.addEventListener("click", () => {
-  if (appState.activeScanner && appState.isScanning) {
-    flashOn = !flashOn;
-    appState.activeScanner.applyVideoConstraints({
-      advanced: [{ torch: flashOn }]
-    }).catch(() => {
-      alert("Senter tidak didukung pada perangkat ini.");
-    });
-  }
-});
-
-// Gallery Image Scan
-elements.btnGalleryScan.addEventListener("click", () => {
-  elements.fileInputGallery.click();
-});
-
-elements.fileInputGallery.addEventListener("change", (e) => {
-  if (e.target.files.length > 0) {
-    const file = e.target.files[0];
-    const html5QrCode = new Html5Qrcode("html5QrcodeReader");
-    html5QrCode.scanFile(file, true)
-      .then(decodedText => {
-        onBarcodeScannedSuccess(decodedText);
-      })
-      .catch(err => {
-        alert("Gagal membaca barcode dari gambar. Pastikan barcode terlihat jelas.");
-      });
-  }
-});
-
-// Manual Input
-elements.btnOpenManualScan.addEventListener("click", () => {
-  openModal(elements.modalManualInput);
-});
-
-document.getElementById("btnSubmitManualScan").addEventListener("click", () => {
-  const code = document.getElementById("manualBarcodeCode").value.trim();
-  if (code) {
-    closeModal(elements.modalManualInput);
-    document.getElementById("manualBarcodeCode").value = "";
-    onBarcodeScannedSuccess(code);
-  }
-});
 
 // ==================== 8. PRODUCT DETAIL & NOT FOUND MODALS ====================
 function showProductDetailModal(product) {
-  document.getElementById("detailCategoryBadge").textContent = product.category || "Umum";
-  document.getElementById("detailProductName").textContent = product.name;
-  document.getElementById("detailBarcodeText").textContent = product.barcode;
-  document.getElementById("detailSellPrice").textContent = formatRupiah(product.sellPrice);
-  document.getElementById("detailBuyPrice").textContent = formatRupiah(product.buyPrice || 0);
+  getEl("detailCategoryBadge").textContent = product.category || "Umum";
+  getEl("detailProductName").textContent = product.name;
+  getEl("detailBarcodeText").textContent = product.barcode;
+  getEl("detailSellPrice").textContent = formatRupiah(product.sellPrice);
+  getEl("detailBuyPrice").textContent = formatRupiah(product.buyPrice || 0);
   
   const margin = (product.sellPrice || 0) - (product.buyPrice || 0);
-  document.getElementById("detailMargin").textContent = formatRupiah(margin);
-  document.getElementById("detailStock").textContent = `${product.stock || 0} pcs`;
+  getEl("detailMargin").textContent = formatRupiah(margin);
+  getEl("detailStock").textContent = `${product.stock || 0} pcs`;
 
-  // Image preview
-  const imgEl = document.getElementById("detailProductImage");
-  const placeholderEl = document.getElementById("detailImagePlaceholder");
+  const imgEl = getEl("detailProductImage");
+  const placeholderEl = getEl("detailImagePlaceholder");
   if (product.image) {
     imgEl.src = product.image;
     imgEl.classList.remove("hidden");
@@ -501,176 +378,73 @@ function showProductDetailModal(product) {
     placeholderEl.classList.remove("hidden");
   }
 
-  // Setup Button Handlers
-  document.getElementById("btnAddCartFromDetail").onclick = () => {
+  getEl("btnAddCartFromDetail").onclick = () => {
     addToCart(product);
-    closeModal(elements.modalProductDetail);
-    openModal(elements.modalCashierCart);
+    closeModal(getEl("modalProductDetail"));
+    openModal(getEl("modalCashierCart"));
   };
 
-  document.getElementById("btnEditFromDetail").onclick = () => {
-    closeModal(elements.modalProductDetail);
+  getEl("btnEditFromDetail").onclick = () => {
+    closeModal(getEl("modalProductDetail"));
     openProductForm(product);
   };
 
-  document.getElementById("btnScanAgainFromDetail").onclick = () => {
-    closeModal(elements.modalProductDetail);
+  getEl("btnScanAgainFromDetail").onclick = () => {
+    closeModal(getEl("modalProductDetail"));
     switchView("viewScan");
   };
 
-  openModal(elements.modalProductDetail);
+  openModal(getEl("modalProductDetail"));
 }
 
-document.getElementById("btnCreateWithBarcode").addEventListener("click", () => {
-  closeModal(elements.modalNotFound);
-  openProductForm({ barcode: appState.scannedBarcode });
-});
-
-// ==================== 9. PRODUCT CRUD & ANTI-DUPLICATE ====================
+// ==================== 9. PRODUCT CRUD & FORM ====================
 function openProductForm(product = null) {
-  elements.productForm.reset();
-  elements.formMarginPreview.textContent = "Rp 0";
-  elements.formImagePreview.classList.add("hidden");
-  elements.formImagePlaceholder.classList.remove("hidden");
-  elements.formImageData.value = "";
+  const form = getEl("productForm");
+  if (form) form.reset();
+  
+  getEl("formMarginPreview").textContent = "Rp 0";
+  getEl("formImagePreview").classList.add("hidden");
+  getEl("formImagePlaceholder").classList.remove("hidden");
+  getEl("formImageData").value = "";
 
   if (product && product.id) {
-    elements.formTitle.textContent = "Edit Produk";
-    elements.formProductId.value = product.id;
-    elements.formBarcode.value = product.barcode || "";
-    elements.formName.value = product.name || "";
-    elements.formCategory.value = product.category || "Makanan";
-    elements.formSellPrice.value = product.sellPrice || "";
-    elements.formBuyPrice.value = product.buyPrice || "";
-    elements.formStock.value = product.stock || 0;
+    getEl("formTitle").textContent = "Edit Produk";
+    getEl("formProductId").value = product.id;
+    getEl("formBarcode").value = product.barcode || "";
+    getEl("formName").value = product.name || "";
+    getEl("formCategory").value = product.category || "Makanan";
+    getEl("formSellPrice").value = product.sellPrice || "";
+    getEl("formBuyPrice").value = product.buyPrice || "";
+    getEl("formStock").value = product.stock || 0;
     
     if (product.image) {
-      elements.formImagePreview.src = product.image;
-      elements.formImagePreview.classList.remove("hidden");
-      elements.formImagePlaceholder.classList.add("hidden");
-      elements.formImageData.value = product.image;
+      getEl("formImagePreview").src = product.image;
+      getEl("formImagePreview").classList.remove("hidden");
+      getEl("formImagePlaceholder").classList.add("hidden");
+      getEl("formImageData").value = product.image;
     }
 
-    elements.btnDeleteProductFromForm.classList.remove("hidden");
+    getEl("btnDeleteProductFromForm").classList.remove("hidden");
     updateMarginCalculation();
   } else {
-    elements.formTitle.textContent = "Tambah Produk Baru";
-    elements.formProductId.value = "";
+    getEl("formTitle").textContent = "Tambah Produk Baru";
+    getEl("formProductId").value = "";
     if (product && product.barcode) {
-      elements.formBarcode.value = product.barcode;
+      getEl("formBarcode").value = product.barcode;
     }
-    elements.btnDeleteProductFromForm.classList.add("hidden");
+    getEl("btnDeleteProductFromForm").classList.add("hidden");
   }
 
-  openModal(elements.modalProductForm);
+  openModal(getEl("modalProductForm"));
 }
 
-// Image Picker Handling
-elements.btnTriggerImagePicker.addEventListener("click", () => {
-  elements.formFileInput.click();
-});
-
-elements.formFileInput.addEventListener("change", (e) => {
-  if (e.target.files.length > 0) {
-    const file = e.target.files[0];
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      elements.formImagePreview.src = evt.target.result;
-      elements.formImagePreview.classList.remove("hidden");
-      elements.formImagePlaceholder.classList.add("hidden");
-      elements.formImageData.value = evt.target.result;
-    };
-    reader.readAsDataURL(file);
-  }
-});
-
-// Auto Margin Calculation
 function updateMarginCalculation() {
-  const sell = Number(elements.formSellPrice.value) || 0;
-  const buy = Number(elements.formBuyPrice.value) || 0;
-  elements.formMarginPreview.textContent = formatRupiah(sell - buy);
+  const sell = Number(getEl("formSellPrice").value) || 0;
+  const buy = Number(getEl("formBuyPrice").value) || 0;
+  getEl("formMarginPreview").textContent = formatRupiah(sell - buy);
 }
-elements.formSellPrice.addEventListener("input", updateMarginCalculation);
-elements.formBuyPrice.addEventListener("input", updateMarginCalculation);
 
-// Save Product Submission (with Anti-Duplicate Check)
-elements.productForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
-
-  const id = elements.formProductId.value ? Number(elements.formProductId.value) : null;
-  const barcode = elements.formBarcode.value.trim();
-  const name = elements.formName.value.trim();
-  const category = elements.formCategory.value;
-  const sellPrice = Number(elements.formSellPrice.value);
-  const buyPrice = Number(elements.formBuyPrice.value) || 0;
-  const stock = Number(elements.formStock.value) || 0;
-  const image = elements.formImageData.value;
-
-  if (!barcode || !name || isNaN(sellPrice)) {
-    alert("Mohon lengkapi data barcode, nama, dan harga jual!");
-    return;
-  }
-
-  // Anti-Duplicate Barcode Check
-  const existing = await dbGetProductByBarcode(barcode);
-  if (existing && existing.id !== id) {
-    appState.duplicateProductTarget = existing;
-    document.getElementById("duplicateBarcodeNum").textContent = barcode;
-    document.getElementById("duplicateProductName").textContent = existing.name;
-    openModal(elements.modalDuplicateBarcode);
-    return; // Cancel save!
-  }
-
-  // Save to DB
-  await dbSaveProduct({
-    id: id || undefined,
-    barcode,
-    name,
-    category,
-    sellPrice,
-    buyPrice,
-    stock,
-    image
-  });
-
-  closeModal(elements.modalProductForm);
-  renderHomeView();
-  renderCatalogView();
-});
-
-// View Duplicate Product Action
-document.getElementById("btnViewDuplicateProduct").addEventListener("click", () => {
-  closeModal(elements.modalDuplicateBarcode);
-  closeModal(elements.modalProductForm);
-  if (appState.duplicateProductTarget) {
-    showProductDetailModal(appState.duplicateProductTarget);
-  }
-});
-
-// Delete Product Confirmation Flow
-elements.btnDeleteProductFromForm.addEventListener("click", () => {
-  appState.targetDeleteId = Number(elements.formProductId.value);
-  document.getElementById("deleteTargetName").textContent = elements.formName.value;
-  openModal(elements.modalConfirmDelete);
-});
-
-document.getElementById("btnConfirmDeleteExecution").addEventListener("click", async () => {
-  if (appState.targetDeleteId) {
-    await dbDeleteProduct(appState.targetDeleteId);
-    closeModal(elements.modalConfirmDelete);
-    closeModal(elements.modalProductForm);
-    renderHomeView();
-    renderCatalogView();
-  }
-});
-
-// Scan Button inside Form
-elements.btnScanForForm.addEventListener("click", () => {
-  closeModal(elements.modalProductForm);
-  switchView("viewScan");
-});
-
-// ==================== 10. KASIR & KERANJANG BELANJA (CASHIER CART) ====================
+// ==================== 10. KASIR & KERANJANG BELANJA ====================
 function addToCart(product) {
   const foundIndex = appState.cart.findIndex(item => item.product.id === product.id);
   if (foundIndex >= 0) {
@@ -684,14 +458,14 @@ function addToCart(product) {
 
 function updateCartUI() {
   const totalCount = appState.cart.reduce((sum, item) => sum + item.qty, 0);
-  elements.cartBadgeCount.textContent = totalCount;
+  getEl("cartBadgeCount").textContent = totalCount;
 
-  // Render items in cart modal
-  elements.cartItemsContainer.innerHTML = "";
+  const container = getEl("cartItemsContainer");
+  container.innerHTML = "";
   let grandTotal = 0;
 
   if (appState.cart.length === 0) {
-    elements.cartItemsContainer.innerHTML = `
+    container.innerHTML = `
       <div style="text-align: center; padding: 40px 0; color: var(--text-muted);">
         <i class="fa-solid fa-cart-flatbed" style="font-size: 48px; margin-bottom: 12px;"></i>
         <p>Keranjang belanja masih kosong.</p>
@@ -715,11 +489,11 @@ function updateCartUI() {
           <button class="btn-qty" onclick="changeCartQty(${index}, 1)">+</button>
         </div>
       `;
-      elements.cartItemsContainer.appendChild(card);
+      container.appendChild(card);
     });
   }
 
-  elements.cartTotalDisplay.textContent = formatRupiah(grandTotal);
+  getEl("cartTotalDisplay").textContent = formatRupiah(grandTotal);
   calculateChangeDue();
 }
 
@@ -733,20 +507,12 @@ function changeCartQty(index, delta) {
   }
 }
 
-elements.btnClearCartItems.addEventListener("click", () => {
-  if (confirm("Kosongkan seluruh keranjang belanja?")) {
-    appState.cart = [];
-    updateCartUI();
-  }
-});
-
-// Calculate Change Due
 function calculateChangeDue() {
   const grandTotal = appState.cart.reduce((sum, item) => sum + (item.product.sellPrice * item.qty), 0);
-  const cash = Number(elements.inputCashReceived.value) || 0;
+  const cash = Number(getEl("inputCashReceived").value) || 0;
   const change = cash - grandTotal;
 
-  const changeCard = elements.cartChangeDisplay;
+  const changeCard = getEl("cartChangeDisplay");
   if (cash >= grandTotal && grandTotal > 0) {
     changeCard.textContent = formatRupiah(change);
     changeCard.className = "change-amount text-neon-green";
@@ -759,127 +525,45 @@ function calculateChangeDue() {
   }
 }
 
-elements.inputCashReceived.addEventListener("input", calculateChangeDue);
-
-// Cash Shortcut Tags
-document.querySelectorAll(".btn-cash-tag").forEach(btn => {
-  btn.addEventListener("click", () => {
-    const grandTotal = appState.cart.reduce((sum, item) => sum + (item.product.sellPrice * item.qty), 0);
-    if (btn.id === "btnCashExact") {
-      elements.inputCashReceived.value = grandTotal;
-    } else {
-      elements.inputCashReceived.value = btn.dataset.val;
-    }
-    calculateChangeDue();
-  });
-});
-
-// Finish Transaction & Receipt
-elements.btnFinishTransaction.addEventListener("click", async () => {
-  const grandTotal = appState.cart.reduce((sum, item) => sum + (item.product.sellPrice * item.qty), 0);
-  const cash = Number(elements.inputCashReceived.value) || 0;
-
-  if (appState.cart.length === 0) {
-    alert("Keranjang masih kosong!");
-    return;
-  }
-
-  if (cash < grandTotal) {
-    alert("Uang pembeli masih kurang dari total belanja!");
-    return;
-  }
-
-  // Deduct stock in DB
-  for (const item of appState.cart) {
-    if (item.product.id) {
-      const current = await dbGetProductByBarcode(item.product.barcode);
-      if (current) {
-        current.stock = Math.max(0, (current.stock || 0) - item.qty);
-        await dbSaveProduct(current);
-      }
-    }
-  }
-
-  // Render Receipt
-  document.getElementById("receiptStoreName").textContent = appState.storeProfile.name;
-  document.getElementById("receiptStoreAddress").textContent = appState.storeProfile.address;
-  document.getElementById("receiptFooterText").textContent = appState.storeProfile.footer;
-  document.getElementById("receiptDate").textContent = formatDateTime(new Date());
-
-  const itemsContainer = document.getElementById("receiptItemsList");
-  itemsContainer.innerHTML = "";
-  appState.cart.forEach(item => {
-    const row = document.createElement("div");
-    row.className = "receipt-row";
-    row.innerHTML = `
-      <span>${escapeHtml(item.product.name)} (${item.qty}x)</span>
-      <span>${formatRupiah(item.product.sellPrice * item.qty)}</span>
-    `;
-    itemsContainer.appendChild(row);
-  });
-
-  document.getElementById("receiptTotal").textContent = formatRupiah(grandTotal);
-  document.getElementById("receiptCash").textContent = formatRupiah(cash);
-  document.getElementById("receiptChange").textContent = formatRupiah(cash - grandTotal);
-
-  closeModal(elements.modalCashierCart);
-  openModal(elements.modalReceipt);
-
-  // Clear Cart
-  appState.cart = [];
-  elements.inputCashReceived.value = "";
-  updateCartUI();
-  renderHomeView();
-});
-
-document.getElementById("btnCloseReceipt").addEventListener("click", () => {
-  closeModal(elements.modalReceipt);
-});
-
-elements.btnCashierScanItem.addEventListener("click", () => {
-  closeModal(elements.modalCashierCart);
-  switchView("viewScan");
-});
-
-elements.btnHeaderCart.addEventListener("click", () => {
-  openModal(elements.modalCashierCart);
-});
-
 // ==================== 11. HOME & CATALOG RENDERERS ====================
 async function updateRecentStats() {
   const products = await dbGetAllProducts();
   const scans = await dbGetScanHistory();
   
-  elements.statTotalProducts.textContent = products.length;
-  elements.statTotalScans.textContent = scans.length;
+  if (getEl("statTotalProducts")) getEl("statTotalProducts").textContent = products.length;
+  if (getEl("statTotalScans")) getEl("statTotalScans").textContent = scans.length;
 }
 
 async function renderHomeView() {
   updateRecentStats();
-  elements.homeStoreName.textContent = appState.storeProfile.name;
+  if (getEl("homeStoreName")) getEl("homeStoreName").textContent = appState.storeProfile.name;
   
   const products = await dbGetAllProducts();
   const recent = products.slice(-5).reverse();
 
-  elements.homeRecentProducts.innerHTML = "";
+  const container = getEl("homeRecentProducts");
+  if (!container) return;
+
+  container.innerHTML = "";
   if (recent.length === 0) {
-    elements.homeRecentProducts.innerHTML = `
+    container.innerHTML = `
       <div style="text-align: center; padding: 24px; color: var(--text-muted);">
         Belum ada produk terdaftar. Klik 'Tambah Produk' untuk menginput barang.
       </div>
     `;
   } else {
     recent.forEach(p => {
-      elements.homeRecentProducts.appendChild(createProductItemCard(p));
+      container.appendChild(createProductItemCard(p));
     });
   }
 }
 
 async function renderCatalogView() {
   const products = await dbGetAllProducts();
-  const query = elements.catalogSearchInput.value.toLowerCase().trim();
+  const searchInput = getEl("catalogSearchInput");
+  const query = searchInput ? searchInput.value.toLowerCase().trim() : "";
   const activeCat = document.querySelector(".pill-btn.active")?.dataset.cat || "all";
-  const sortBy = elements.catalogSortSelect.value;
+  const sortBy = getEl("catalogSortSelect")?.value || "newest";
 
   let filtered = products.filter(p => {
     const matchQuery = p.name.toLowerCase().includes(query) || p.barcode.toLowerCase().includes(query);
@@ -887,20 +571,21 @@ async function renderCatalogView() {
     return matchQuery && matchCat;
   });
 
-  // Sorting
   filtered.sort((a, b) => {
     if (sortBy === "name_asc") return a.name.localeCompare(b.name);
     if (sortBy === "price_asc") return a.sellPrice - b.sellPrice;
     if (sortBy === "price_desc") return b.sellPrice - a.sellPrice;
     if (sortBy === "stock_asc") return a.stock - b.stock;
-    return new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0); // newest
+    return new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0);
   });
 
-  elements.catalogCountText.textContent = `Menampilkan ${filtered.length} dari ${products.length} produk`;
-  elements.catalogProductList.innerHTML = "";
+  if (getEl("catalogCountText")) getEl("catalogCountText").textContent = `Menampilkan ${filtered.length} dari ${products.length} produk`;
+  const container = getEl("catalogProductList");
+  if (!container) return;
 
+  container.innerHTML = "";
   if (filtered.length === 0) {
-    elements.catalogProductList.innerHTML = `
+    container.innerHTML = `
       <div style="text-align: center; padding: 40px 0; color: var(--text-muted);">
         <i class="fa-solid fa-box-open" style="font-size: 48px; margin-bottom: 12px;"></i>
         <p>Tidak ada produk yang cocok dengan pencarian.</p>
@@ -908,7 +593,7 @@ async function renderCatalogView() {
     `;
   } else {
     filtered.forEach(p => {
-      elements.catalogProductList.appendChild(createProductItemCard(p));
+      container.appendChild(createProductItemCard(p));
     });
   }
 }
@@ -939,56 +624,16 @@ function createProductItemCard(product) {
   return card;
 }
 
-// Quick Search on Home View
-elements.homeSearchInput.addEventListener("input", async (e) => {
-  const query = e.target.value.toLowerCase().trim();
-  if (!query) {
-    elements.homeSearchResults.classList.add("hidden");
-    elements.btnClearHomeSearch.classList.add("hidden");
-    return;
-  }
-
-  elements.btnClearHomeSearch.classList.remove("hidden");
-  const products = await dbGetAllProducts();
-  const results = products.filter(p => p.name.toLowerCase().includes(query) || p.barcode.toLowerCase().includes(query)).slice(0, 5);
-
-  elements.homeSearchResults.innerHTML = "";
-  if (results.length === 0) {
-    elements.homeSearchResults.innerHTML = `<div class="dropdown-item"><span>Tidak ditemukan</span></div>`;
-  } else {
-    results.forEach(p => {
-      const item = document.createElement("div");
-      item.className = "dropdown-item";
-      item.innerHTML = `
-        <div>
-          <strong>${escapeHtml(p.name)}</strong>
-          <div style="font-size: 11px; color: var(--text-muted);">${p.barcode}</div>
-        </div>
-        <div style="font-weight: 700; color: var(--neon-green);">${formatRupiah(p.sellPrice)}</div>
-      `;
-      item.onclick = () => {
-        elements.homeSearchResults.classList.add("hidden");
-        showProductDetailModal(p);
-      };
-      elements.homeSearchResults.appendChild(item);
-    });
-  }
-  elements.homeSearchResults.classList.remove("hidden");
-});
-
-elements.btnClearHomeSearch.addEventListener("click", () => {
-  elements.homeSearchInput.value = "";
-  elements.homeSearchResults.classList.add("hidden");
-  elements.btnClearHomeSearch.classList.add("hidden");
-});
-
-// ==================== 12. HISTORY VIEW RENDERER ====================
+// ==================== 12. HISTORY RENDERER ====================
 async function renderHistoryView() {
   const history = await dbGetScanHistory();
-  elements.scanHistoryList.innerHTML = "";
+  const container = getEl("scanHistoryList");
+  if (!container) return;
+
+  container.innerHTML = "";
 
   if (history.length === 0) {
-    elements.scanHistoryList.innerHTML = `
+    container.innerHTML = `
       <div style="text-align: center; padding: 40px 0; color: var(--text-muted);">
         <i class="fa-solid fa-clock-rotate-left" style="font-size: 48px; margin-bottom: 12px;"></i>
         <p>Belum ada riwayat scan barcode.</p>
@@ -1010,105 +655,12 @@ async function renderHistoryView() {
           ${item.price ? formatRupiah(item.price) : "-"}
         </div>
       `;
-      elements.scanHistoryList.appendChild(card);
+      container.appendChild(card);
     });
   }
 }
 
-elements.btnClearScanHistory.addEventListener("click", async () => {
-  if (confirm("Hapus seluruh riwayat scan barcode?")) {
-    await dbClearScanHistory();
-    renderHistoryView();
-    updateRecentStats();
-  }
-});
-
-// ==================== 13. SETTINGS & BACKUP/RESTORE ENGINE ====================
-// Save Store Profile
-elements.btnSaveStoreProfile.addEventListener("click", () => {
-  appState.storeProfile.name = elements.settingStoreName.value.trim() || "Toko ScanMart";
-  appState.storeProfile.address = elements.settingStoreAddress.value.trim();
-  appState.storeProfile.footer = elements.settingReceiptFooter.value.trim();
-  
-  localStorage.setItem("scanmart_store", JSON.stringify(appState.storeProfile));
-  alert("Profil toko berhasil disimpan!");
-  renderHomeView();
-});
-
-// Export JSON Backup
-elements.btnExportData.addEventListener("click", async () => {
-  const products = await dbGetAllProducts();
-  const backupData = {
-    app: "ScanMart",
-    version: "1.0.0",
-    exportDate: new Date().toISOString(),
-    storeProfile: appState.storeProfile,
-    products: products
-  };
-
-  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData, null, 2));
-  const downloadAnchor = document.createElement("a");
-  downloadAnchor.setAttribute("href", dataStr);
-  downloadAnchor.setAttribute("download", `ScanMart_Backup_${formatFileTimestamp(new Date())}.json`);
-  document.body.appendChild(downloadAnchor);
-  downloadAnchor.click();
-  downloadAnchor.remove();
-});
-
-// Restore JSON Backup
-elements.btnRestoreData.addEventListener("click", () => {
-  elements.fileInputRestore.click();
-});
-
-elements.fileInputRestore.addEventListener("change", (e) => {
-  if (e.target.files.length > 0) {
-    const file = e.target.files[0];
-    const reader = new FileReader();
-    reader.onload = async (evt) => {
-      try {
-        const parsed = JSON.parse(evt.target.result);
-        if (parsed && Array.isArray(parsed.products)) {
-          for (const item of parsed.products) {
-            delete item.id; // allow auto-increment or put
-            await dbSaveProduct(item);
-          }
-          alert(`Berhasil mengimpor ${parsed.products.length} data produk!`);
-          renderHomeView();
-          renderCatalogView();
-        } else {
-          alert("Format file JSON tidak valid.");
-        }
-      } catch (err) {
-        alert("Gagal membaca file JSON.");
-      }
-    };
-    reader.readAsText(file);
-  }
-});
-
-// Seed Sample Data
-elements.btnSeedSampleData.addEventListener("click", async () => {
-  await seedSampleDataIfNeeded();
-  alert("Sampel data produk minimarket berhasil dimasukkan!");
-  renderHomeView();
-  renderCatalogView();
-});
-
-// Reset All Data
-elements.btnResetAllData.addEventListener("click", async () => {
-  if (confirm("APAKAH ANDA YAKIN? Seluruh produk dan riwayat akan dihapus permanen!")) {
-    const products = await dbGetAllProducts();
-    for (const p of products) {
-      await dbDeleteProduct(p.id);
-    }
-    await dbClearScanHistory();
-    alert("Database berhasil dikosongkan.");
-    renderHomeView();
-    renderCatalogView();
-  }
-});
-
-// ==================== 14. HELPER UTILITIES ====================
+// ==================== 13. HELPER UTILITIES ====================
 function formatRupiah(number) {
   return new Intl.NumberFormat("id-ID", {
     style: "currency",
@@ -1127,10 +679,6 @@ function formatDateTime(dateObj) {
   });
 }
 
-function formatFileTimestamp(dateObj) {
-  return dateObj.toISOString().slice(0, 10);
-}
-
 function escapeHtml(str) {
   if (!str) return "";
   return str.replace(/[&<>"']/g, (m) => ({
@@ -1138,87 +686,483 @@ function escapeHtml(str) {
   })[m]);
 }
 
-// Category Pill Filter click
-elements.categoryFilterPills.addEventListener("click", (e) => {
-  if (e.target.classList.contains("pill-btn")) {
-    document.querySelectorAll(".pill-btn").forEach(p => p.classList.remove("active"));
-    e.target.classList.add("active");
-    renderCatalogView();
+// ==================== 14. EVENT LISTENERS BINDING ====================
+function bindEventListeners() {
+  // Theme Toggle
+  if (getEl("btnThemeToggle")) {
+    getEl("btnThemeToggle").addEventListener("click", () => {
+      const newTheme = appState.theme === "dark" ? "light" : "dark";
+      applyTheme(newTheme);
+    });
   }
-});
 
-elements.catalogSearchInput.addEventListener("input", renderCatalogView);
-elements.catalogSortSelect.addEventListener("change", renderCatalogView);
-
-// Main Action Cards
-elements.menuCardScan.onclick = () => switchView("viewScan");
-elements.menuCardCashier.onclick = () => openModal(elements.modalCashierCart);
-elements.menuCardAdd.onclick = () => openProductForm();
-elements.menuCardList.onclick = () => switchView("viewProducts");
-
-elements.btnNavScan.onclick = () => switchView("viewScan");
-elements.btnFabAddProduct.onclick = () => openProductForm();
-elements.btnSeeAllProducts.onclick = () => switchView("viewProducts");
-elements.btnBackFromScan.onclick = () => switchView("viewHome");
-
-// Bottom Nav Delegation
-elements.navItems.forEach(item => {
-  item.addEventListener("click", () => {
-    switchView(item.dataset.view);
-  });
-});
-
-// Onboarding Controller
-elements.btnNextOnboarding.addEventListener("click", () => {
-  const slides = document.querySelectorAll(".onboarding-slide");
-  const dots = document.querySelectorAll(".dot");
-  let activeIndex = 0;
-  
-  slides.forEach((s, idx) => {
-    if (s.classList.contains("active")) activeIndex = idx;
-  });
-
-  if (activeIndex < slides.length - 1) {
-    slides[activeIndex].classList.remove("active");
-    dots[activeIndex].classList.remove("active");
-    
-    slides[activeIndex + 1].classList.add("active");
-    dots[activeIndex + 1].classList.add("active");
-  } else {
-    completeOnboarding();
+  // Flashlight & Gallery
+  if (getEl("btnToggleFlash")) {
+    getEl("btnToggleFlash").addEventListener("click", () => {
+      if (appState.activeScanner && appState.isScanning) {
+        appState.activeScanner.applyVideoConstraints({ advanced: [{ torch: true }] }).catch(() => {
+          alert("Senter tidak didukung pada perangkat ini.");
+        });
+      }
+    });
   }
-});
 
-elements.btnSkipOnboarding.addEventListener("click", completeOnboarding);
+  if (getEl("btnGalleryScan")) {
+    getEl("btnGalleryScan").addEventListener("click", () => getEl("fileInputGallery")?.click());
+  }
+
+  if (getEl("fileInputGallery")) {
+    getEl("fileInputGallery").addEventListener("change", (e) => {
+      if (e.target.files.length > 0) {
+        const file = e.target.files[0];
+        const html5QrCode = new Html5Qrcode("html5QrcodeReader");
+        html5QrCode.scanFile(file, true).then(onBarcodeScannedSuccess).catch(() => {
+          alert("Gagal membaca barcode dari gambar.");
+        });
+      }
+    });
+  }
+
+  if (getEl("btnOpenManualScan")) {
+    getEl("btnOpenManualScan").addEventListener("click", () => openModal(getEl("modalManualInput")));
+  }
+
+  if (getEl("btnSubmitManualScan")) {
+    getEl("btnSubmitManualScan").addEventListener("click", () => {
+      const code = getEl("manualBarcodeCode")?.value.trim();
+      if (code) {
+        closeModal(getEl("modalManualInput"));
+        if (getEl("manualBarcodeCode")) getEl("manualBarcodeCode").value = "";
+        onBarcodeScannedSuccess(code);
+      }
+    });
+  }
+
+  if (getEl("btnCreateWithBarcode")) {
+    getEl("btnCreateWithBarcode").addEventListener("click", () => {
+      closeModal(getEl("modalNotFound"));
+      openProductForm({ barcode: appState.scannedBarcode });
+    });
+  }
+
+  // Image Picker
+  if (getEl("btnTriggerImagePicker")) {
+    getEl("btnTriggerImagePicker").addEventListener("click", () => getEl("formFileInput")?.click());
+  }
+  if (getEl("formFileInput")) {
+    getEl("formFileInput").addEventListener("change", (e) => {
+      if (e.target.files.length > 0) {
+        const file = e.target.files[0];
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+          getEl("formImagePreview").src = evt.target.result;
+          getEl("formImagePreview").classList.remove("hidden");
+          getEl("formImagePlaceholder").classList.add("hidden");
+          getEl("formImageData").value = evt.target.result;
+        };
+        reader.readAsDataURL(file);
+      }
+    });
+  }
+
+  if (getEl("formSellPrice")) getEl("formSellPrice").addEventListener("input", updateMarginCalculation);
+  if (getEl("formBuyPrice")) getEl("formBuyPrice").addEventListener("input", updateMarginCalculation);
+
+  // Form Submission
+  const pForm = getEl("productForm");
+  if (pForm) {
+    pForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const id = getEl("formProductId").value ? Number(getEl("formProductId").value) : null;
+      const barcode = getEl("formBarcode").value.trim();
+      const name = getEl("formName").value.trim();
+      const category = getEl("formCategory").value;
+      const sellPrice = Number(getEl("formSellPrice").value);
+      const buyPrice = Number(getEl("formBuyPrice").value) || 0;
+      const stock = Number(getEl("formStock").value) || 0;
+      const image = getEl("formImageData").value;
+
+      if (!barcode || !name || isNaN(sellPrice)) {
+        alert("Mohon lengkapi data barcode, nama, dan harga jual!");
+        return;
+      }
+
+      const existing = await dbGetProductByBarcode(barcode);
+      if (existing && existing.id !== id) {
+        appState.duplicateProductTarget = existing;
+        if (getEl("duplicateBarcodeNum")) getEl("duplicateBarcodeNum").textContent = barcode;
+        if (getEl("duplicateProductName")) getEl("duplicateProductName").textContent = existing.name;
+        openModal(getEl("modalDuplicateBarcode"));
+        return;
+      }
+
+      await dbSaveProduct({ id: id || undefined, barcode, name, category, sellPrice, buyPrice, stock, image });
+      closeModal(getEl("modalProductForm"));
+      renderHomeView();
+      renderCatalogView();
+    });
+  }
+
+  if (getEl("btnViewDuplicateProduct")) {
+    getEl("btnViewDuplicateProduct").addEventListener("click", () => {
+      closeModal(getEl("modalDuplicateBarcode"));
+      closeModal(getEl("modalProductForm"));
+      if (appState.duplicateProductTarget) showProductDetailModal(appState.duplicateProductTarget);
+    });
+  }
+
+  if (getEl("btnDeleteProductFromForm")) {
+    getEl("btnDeleteProductFromForm").addEventListener("click", () => {
+      appState.targetDeleteId = Number(getEl("formProductId").value);
+      if (getEl("deleteTargetName")) getEl("deleteTargetName").textContent = getEl("formName").value;
+      openModal(getEl("modalConfirmDelete"));
+    });
+  }
+
+  if (getEl("btnConfirmDeleteExecution")) {
+    getEl("btnConfirmDeleteExecution").addEventListener("click", async () => {
+      if (appState.targetDeleteId) {
+        await dbDeleteProduct(appState.targetDeleteId);
+        closeModal(getEl("modalConfirmDelete"));
+        closeModal(getEl("modalProductForm"));
+        renderHomeView();
+        renderCatalogView();
+      }
+    });
+  }
+
+  if (getEl("btnScanForForm")) {
+    getEl("btnScanForForm").addEventListener("click", () => {
+      closeModal(getEl("modalProductForm"));
+      switchView("viewScan");
+    });
+  }
+
+  // Cart & Cashier Controls
+  if (getEl("btnClearCartItems")) {
+    getEl("btnClearCartItems").addEventListener("click", () => {
+      if (confirm("Kosongkan seluruh keranjang belanja?")) {
+        appState.cart = [];
+        updateCartUI();
+      }
+    });
+  }
+
+  if (getEl("inputCashReceived")) {
+    getEl("inputCashReceived").addEventListener("input", calculateChangeDue);
+  }
+
+  document.querySelectorAll(".btn-cash-tag").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const grandTotal = appState.cart.reduce((sum, item) => sum + (item.product.sellPrice * item.qty), 0);
+      if (btn.id === "btnCashExact") {
+        getEl("inputCashReceived").value = grandTotal;
+      } else {
+        getEl("inputCashReceived").value = btn.dataset.val;
+      }
+      calculateChangeDue();
+    });
+  });
+
+  if (getEl("btnFinishTransaction")) {
+    getEl("btnFinishTransaction").addEventListener("click", async () => {
+      const grandTotal = appState.cart.reduce((sum, item) => sum + (item.product.sellPrice * item.qty), 0);
+      const cash = Number(getEl("inputCashReceived").value) || 0;
+
+      if (appState.cart.length === 0) { alert("Keranjang masih kosong!"); return; }
+      if (cash < grandTotal) { alert("Uang pembeli kurang dari total!"); return; }
+
+      for (const item of appState.cart) {
+        if (item.product.id) {
+          const current = await dbGetProductByBarcode(item.product.barcode);
+          if (current) {
+            current.stock = Math.max(0, (current.stock || 0) - item.qty);
+            await dbSaveProduct(current);
+          }
+        }
+      }
+
+      if (getEl("receiptStoreName")) getEl("receiptStoreName").textContent = appState.storeProfile.name;
+      if (getEl("receiptStoreAddress")) getEl("receiptStoreAddress").textContent = appState.storeProfile.address;
+      if (getEl("receiptFooterText")) getEl("receiptFooterText").textContent = appState.storeProfile.footer;
+      if (getEl("receiptDate")) getEl("receiptDate").textContent = formatDateTime(new Date());
+
+      const itemsContainer = getEl("receiptItemsList");
+      if (itemsContainer) {
+        itemsContainer.innerHTML = "";
+        appState.cart.forEach(item => {
+          const row = document.createElement("div");
+          row.className = "receipt-row";
+          row.innerHTML = `<span>${escapeHtml(item.product.name)} (${item.qty}x)</span><span>${formatRupiah(item.product.sellPrice * item.qty)}</span>`;
+          itemsContainer.appendChild(row);
+        });
+      }
+
+      if (getEl("receiptTotal")) getEl("receiptTotal").textContent = formatRupiah(grandTotal);
+      if (getEl("receiptCash")) getEl("receiptCash").textContent = formatRupiah(cash);
+      if (getEl("receiptChange")) getEl("receiptChange").textContent = formatRupiah(cash - grandTotal);
+
+      closeModal(getEl("modalCashierCart"));
+      openModal(getEl("modalReceipt"));
+
+      appState.cart = [];
+      if (getEl("inputCashReceived")) getEl("inputCashReceived").value = "";
+      updateCartUI();
+      renderHomeView();
+    });
+  }
+
+  if (getEl("btnCloseReceipt")) {
+    getEl("btnCloseReceipt").addEventListener("click", () => closeModal(getEl("modalReceipt")));
+  }
+  if (getEl("btnCashierScanItem")) {
+    getEl("btnCashierScanItem").addEventListener("click", () => {
+      closeModal(getEl("modalCashierCart"));
+      switchView("viewScan");
+    });
+  }
+  if (getEl("btnHeaderCart")) {
+    getEl("btnHeaderCart").addEventListener("click", () => openModal(getEl("modalCashierCart")));
+  }
+
+  // Home Quick Search
+  const homeSearch = getEl("homeSearchInput");
+  if (homeSearch) {
+    homeSearch.addEventListener("input", async (e) => {
+      const query = e.target.value.toLowerCase().trim();
+      const resultsContainer = getEl("homeSearchResults");
+      const clearBtn = getEl("btnClearHomeSearch");
+
+      if (!query) {
+        if (resultsContainer) resultsContainer.classList.add("hidden");
+        if (clearBtn) clearBtn.classList.add("hidden");
+        return;
+      }
+
+      if (clearBtn) clearBtn.classList.remove("hidden");
+      const products = await dbGetAllProducts();
+      const results = products.filter(p => p.name.toLowerCase().includes(query) || p.barcode.toLowerCase().includes(query)).slice(0, 5);
+
+      if (resultsContainer) {
+        resultsContainer.innerHTML = "";
+        if (results.length === 0) {
+          resultsContainer.innerHTML = `<div class="dropdown-item"><span>Tidak ditemukan</span></div>`;
+        } else {
+          results.forEach(p => {
+            const item = document.createElement("div");
+            item.className = "dropdown-item";
+            item.innerHTML = `<div><strong>${escapeHtml(p.name)}</strong><div style="font-size:11px;color:var(--text-muted);">${p.barcode}</div></div><div style="font-weight:700;color:var(--neon-green);">${formatRupiah(p.sellPrice)}</div>`;
+            item.onclick = () => {
+              resultsContainer.classList.add("hidden");
+              showProductDetailModal(p);
+            };
+            resultsContainer.appendChild(item);
+          });
+        }
+        resultsContainer.classList.remove("hidden");
+      }
+    });
+  }
+
+  if (getEl("btnClearHomeSearch")) {
+    getEl("btnClearHomeSearch").addEventListener("click", () => {
+      if (getEl("homeSearchInput")) getEl("homeSearchInput").value = "";
+      if (getEl("homeSearchResults")) getEl("homeSearchResults").classList.add("hidden");
+      getEl("btnClearHomeSearch").classList.add("hidden");
+    });
+  }
+
+  if (getEl("btnClearScanHistory")) {
+    getEl("btnClearScanHistory").addEventListener("click", async () => {
+      if (confirm("Hapus seluruh riwayat scan barcode?")) {
+        await dbClearScanHistory();
+        renderHistoryView();
+        updateRecentStats();
+      }
+    });
+  }
+
+  if (getEl("btnSaveStoreProfile")) {
+    getEl("btnSaveStoreProfile").addEventListener("click", () => {
+      appState.storeProfile.name = getEl("settingStoreName")?.value.trim() || "Toko ScanMart";
+      appState.storeProfile.address = getEl("settingStoreAddress")?.value.trim() || "";
+      appState.storeProfile.footer = getEl("settingReceiptFooter")?.value.trim() || "";
+      localStorage.setItem("scanmart_store", JSON.stringify(appState.storeProfile));
+      alert("Profil toko disimpan!");
+      renderHomeView();
+    });
+  }
+
+  if (getEl("btnExportData")) {
+    getEl("btnExportData").addEventListener("click", async () => {
+      const products = await dbGetAllProducts();
+      const backupData = { app: "ScanMart", version: "1.0.0", exportDate: new Date().toISOString(), products };
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData, null, 2));
+      const a = document.createElement("a");
+      a.href = dataStr;
+      a.download = `ScanMart_Backup.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    });
+  }
+
+  if (getEl("btnRestoreData")) {
+    getEl("btnRestoreData").addEventListener("click", () => getEl("fileInputRestore")?.click());
+  }
+
+  if (getEl("fileInputRestore")) {
+    getEl("fileInputRestore").addEventListener("change", (e) => {
+      if (e.target.files.length > 0) {
+        const file = e.target.files[0];
+        const reader = new FileReader();
+        reader.onload = async (evt) => {
+          try {
+            const parsed = JSON.parse(evt.target.result);
+            if (parsed && Array.isArray(parsed.products)) {
+              for (const item of parsed.products) {
+                delete item.id;
+                await dbSaveProduct(item);
+              }
+              alert(`Berhasil mengimpor ${parsed.products.length} produk!`);
+              renderHomeView();
+              renderCatalogView();
+            }
+          } catch (err) { alert("File JSON tidak valid."); }
+        };
+        reader.readAsText(file);
+      }
+    });
+  }
+
+  if (getEl("btnSeedSampleData")) {
+    getEl("btnSeedSampleData").addEventListener("click", async () => {
+      await seedSampleDataIfNeeded();
+      alert("Sampel data minimarket dimasukkan!");
+      renderHomeView();
+      renderCatalogView();
+    });
+  }
+
+  if (getEl("btnResetAllData")) {
+    getEl("btnResetAllData").addEventListener("click", async () => {
+      if (confirm("Hapus seluruh data produk?")) {
+        const products = await dbGetAllProducts();
+        for (const p of products) await dbDeleteProduct(p.id);
+        await dbClearScanHistory();
+        alert("Database dikosongkan.");
+        renderHomeView();
+        renderCatalogView();
+      }
+    });
+  }
+
+  if (getEl("categoryFilterPills")) {
+    getEl("categoryFilterPills").addEventListener("click", (e) => {
+      if (e.target.classList.contains("pill-btn")) {
+        document.querySelectorAll(".pill-btn").forEach(p => p.classList.remove("active"));
+        e.target.classList.add("active");
+        renderCatalogView();
+      }
+    });
+  }
+
+  if (getEl("catalogSearchInput")) getEl("catalogSearchInput").addEventListener("input", renderCatalogView);
+  if (getEl("catalogSortSelect")) getEl("catalogSortSelect").addEventListener("change", renderCatalogView);
+
+  // Menu Cards
+  if (getEl("menuCardScan")) getEl("menuCardScan").onclick = () => switchView("viewScan");
+  if (getEl("menuCardCashier")) getEl("menuCardCashier").onclick = () => openModal(getEl("modalCashierCart"));
+  if (getEl("menuCardAdd")) getEl("menuCardAdd").onclick = () => openProductForm();
+  if (getEl("menuCardList")) getEl("menuCardList").onclick = () => switchView("viewProducts");
+
+  if (getEl("btnNavScan")) getEl("btnNavScan").onclick = () => switchView("viewScan");
+  if (getEl("btnFabAddProduct")) getEl("btnFabAddProduct").onclick = () => openProductForm();
+  if (getEl("btnSeeAllProducts")) getEl("btnSeeAllProducts").onclick = () => switchView("viewProducts");
+  if (getEl("btnBackFromScan")) getEl("btnBackFromScan").onclick = () => switchView("viewHome");
+
+  document.querySelectorAll(".nav-item").forEach(item => {
+    item.addEventListener("click", () => switchView(item.dataset.view));
+  });
+
+  if (getEl("btnNextOnboarding")) {
+    getEl("btnNextOnboarding").addEventListener("click", () => {
+      const slides = document.querySelectorAll(".onboarding-slide");
+      const dots = document.querySelectorAll(".dot");
+      let activeIndex = 0;
+      slides.forEach((s, idx) => { if (s.classList.contains("active")) activeIndex = idx; });
+      if (activeIndex < slides.length - 1) {
+        slides[activeIndex].classList.remove("active");
+        dots[activeIndex].classList.remove("active");
+        slides[activeIndex + 1].classList.add("active");
+        dots[activeIndex + 1].classList.add("active");
+      } else {
+        completeOnboarding();
+      }
+    });
+  }
+
+  if (getEl("btnSkipOnboarding")) getEl("btnSkipOnboarding").addEventListener("click", completeOnboarding);
+}
 
 function completeOnboarding() {
   localStorage.setItem("scanmart_onboarded", "true");
-  elements.onboardingScreen.classList.add("hidden");
-  elements.appShell.classList.remove("hidden");
+  if (getEl("onboardingScreen")) getEl("onboardingScreen").classList.add("hidden");
+  if (getEl("appShell")) getEl("appShell").classList.remove("hidden");
   switchView("viewHome");
 }
 
-// ==================== 15. INITIALIZATION BOOTSTRAP ====================
-window.addEventListener("DOMContentLoaded", async () => {
+// ==================== 15. FAIL-SAFE INITIALIZATION BOOTSTRAP ====================
+let isAppInitialized = false;
+
+function dismissSplashScreen() {
+  const splash = getEl("splashScreen");
+  const shell = getEl("appShell");
+  const onboarding = getEl("onboardingScreen");
+
+  if (splash) splash.classList.add("hidden");
+
+  const onboarded = localStorage.getItem("scanmart_onboarded") === "true";
+  if (!onboarded && onboarding) {
+    onboarding.classList.remove("hidden");
+  } else if (shell) {
+    shell.classList.remove("hidden");
+  }
+}
+
+async function initApp() {
+  if (isAppInitialized) return;
+  isAppInitialized = true;
+
   applyTheme(appState.theme);
+  bindEventListeners();
 
-  // Initialize IndexedDB
-  await initDatabase();
-  await seedSampleDataIfNeeded();
+  // Load Settings
+  if (getEl("settingStoreName")) getEl("settingStoreName").value = appState.storeProfile.name;
+  if (getEl("settingStoreAddress")) getEl("settingStoreAddress").value = appState.storeProfile.address || "";
+  if (getEl("settingReceiptFooter")) getEl("settingReceiptFooter").value = appState.storeProfile.footer || "";
 
-  // Load Settings into UI
-  elements.settingStoreName.value = appState.storeProfile.name;
-  elements.settingStoreAddress.value = appState.storeProfile.address || "";
-  elements.settingReceiptFooter.value = appState.storeProfile.footer || "";
-
-  // Splash Screen Timeout
+  // Guaranteed Fail-Safe Timer: Dismiss Splash Screen after 1.2s max
   setTimeout(() => {
-    elements.splashScreen.classList.add("hidden");
-    if (!appState.onboarded) {
-      elements.onboardingScreen.classList.remove("hidden");
-    } else {
-      elements.appShell.classList.remove("hidden");
-      switchView("viewHome");
-    }
-  }, 1800);
-});
+    dismissSplashScreen();
+    switchView("viewHome");
+  }, 1200);
+
+  // Initialize DB asynchronously without blocking UI transition
+  try {
+    await initDatabase();
+    await seedSampleDataIfNeeded();
+    renderHomeView();
+  } catch (err) {
+    console.warn("DB init background exception:", err);
+  }
+}
+
+// Robust bootstrap caller (handles DOM ready or already loaded state)
+if (document.readyState === "complete" || document.readyState === "interactive") {
+  initApp();
+} else {
+  document.addEventListener("DOMContentLoaded", initApp);
+  // Fallback timer in case DOMContentLoaded event was missed
+  setTimeout(initApp, 800);
+}
