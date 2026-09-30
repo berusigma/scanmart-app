@@ -2,61 +2,778 @@
 <html lang="id" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Capacitor 7 Starter App</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>ScanMart — Scan Barcode & Kasir Toko</title>
+  
+  <!-- Google Fonts: Plus Jakarta Sans -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- FontAwesome Icons CDN -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" integrity="sha512-DTOQO9RWCH3ppGqcWaEA1BIZOC6xxalwEsw9c2QQeAIftl+Vegovlnee1c9QX4TctnWMn13TZye+giMm8e2LwA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  
   <link rel="stylesheet" href="style.css" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 </head>
 <body>
-  <div class="app-container">
-    
-    <!-- HEADER -->
-    <header class="app-header">
-      <div class="logo-box">
-        <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
-          <polyline points="2 17 12 22 22 17"></polyline>
-          <polyline points="2 12 12 17 22 12"></polyline>
-        </svg>
+
+  <!-- ==================== 1. SPLASH SCREEN ==================== -->
+  <div id="splashScreen" class="screen-view splash-view active">
+    <div class="splash-content">
+      <div class="splash-logo-container">
+        <div class="logo-glow"></div>
+        <div class="logo-box">
+          <i class="fa-solid fa-barcode logo-icon"></i>
+          <div class="logo-laser"></div>
+        </div>
       </div>
-      <div>
-        <h1 class="app-title">CAPACITOR 7 STARTER</h1>
-        <p class="app-subtitle">Hybrid Android Template Ready for GitHub Actions</p>
+      <h1 class="brand-title">Scan<span class="text-neon">Mart</span></h1>
+      <p class="brand-tagline">Scan Barcode, Cek Harga Barang & Kasir Toko</p>
+      <div class="splash-loader">
+        <div class="loader-bar"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 2. ONBOARDING SCREEN ==================== -->
+  <div id="onboardingScreen" class="screen-view onboarding-view hidden">
+    <div class="onboarding-container">
+      <div class="onboarding-slides" id="onboardingSlides">
+        <!-- Slide 1 -->
+        <div class="onboarding-slide active">
+          <div class="slide-illustration">
+            <i class="fa-solid fa-camera-retro slide-icon neon-cyan"></i>
+            <div class="scan-ring ring-1"></div>
+            <div class="scan-ring ring-2"></div>
+          </div>
+          <h2>Scan Barcode Kilat</h2>
+          <p>Kamera deteksi otomatis berbagai jenis barcode (EAN, UPC, Code128, QR) dalam hitungan detik dengan responsivitas tinggi.</p>
+        </div>
+        <!-- Slide 2 -->
+        <div class="onboarding-slide">
+          <div class="slide-illustration">
+            <i class="fa-solid fa-boxes-stacked slide-icon neon-purple"></i>
+            <div class="scan-ring ring-1"></div>
+            <div class="scan-ring ring-2"></div>
+          </div>
+          <h2>Kelola Produk Offline</h2>
+          <p>Simpan puluhan ribu data produk lokal di HP tanpa butuh internet. Bebas biaya dan tanpa perlu login akun!</p>
+        </div>
+        <!-- Slide 3 -->
+        <div class="onboarding-slide">
+          <div class="slide-illustration">
+            <i class="fa-solid fa-cash-register slide-icon neon-green"></i>
+            <div class="scan-ring ring-1"></div>
+            <div class="scan-ring ring-2"></div>
+          </div>
+          <h2>Kasir & Keranjang Belanja</h2>
+          <p>Langsung masukkan barang ke keranjang saat scan, hitung total belanjaan dan kembalian tunai tanpa ribet pakai kalkulator!</p>
+        </div>
+      </div>
+
+      <div class="onboarding-footer">
+        <div class="slide-dots" id="slideDots">
+          <span class="dot active"></span>
+          <span class="dot"></span>
+          <span class="dot"></span>
+        </div>
+        <div class="onboarding-buttons">
+          <button class="btn-secondary" id="btnSkipOnboarding">Lewati</button>
+          <button class="btn-primary" id="btnNextOnboarding">
+            <span>Lanjut</span> <i class="fa-solid fa-arrow-right"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== APP CONTAINER (MAIN SHELL) ==================== -->
+  <div id="appShell" class="app-shell hidden">
+    
+    <!-- TOP NAVBAR -->
+    <header class="app-header">
+      <div class="header-left">
+        <div class="brand-badge">
+          <i class="fa-solid fa-barcode brand-icon"></i>
+          <span class="brand-name">Scan<span class="text-neon">Mart</span></span>
+        </div>
+      </div>
+      <div class="header-right">
+        <!-- Cart Drawer Button -->
+        <button class="icon-btn cart-badge-btn" id="btnHeaderCart" title="Keranjang Kasir">
+          <i class="fa-solid fa-cart-shopping"></i>
+          <span class="cart-badge-count" id="cartBadgeCount">0</span>
+        </button>
+        <!-- Theme Toggle -->
+        <button class="icon-btn theme-toggle-btn" id="btnThemeToggle" title="Ganti Tema">
+          <i class="fa-solid fa-moon icon-dark"></i>
+          <i class="fa-solid fa-sun icon-light"></i>
+        </button>
       </div>
     </header>
 
-    <!-- CONTENT CARD -->
-    <main class="card-container">
-      <div class="status-banner">
-        <span class="status-dot"></span>
-        <span>Aplikasi Siap Digunakan!</span>
-      </div>
+    <!-- MAIN VIEWS CONTAINER -->
+    <main class="main-content">
 
-      <p class="intro-text">
-        Ini adalah starter template kosongan Capacitor 7. Edit file di folder <code>public/</code> untuk mulai membuat aplikasi Anda.
-      </p>
+      <!-- ==================== 3. BERANDA (HOME VIEW) ==================== -->
+      <section id="viewHome" class="app-view active">
+        <!-- Banner Greeting & Store Profile -->
+        <div class="store-banner">
+          <div class="store-info">
+            <h2 id="homeStoreName">Toko ScanMart</h2>
+            <p id="homeStoreDesc"><i class="fa-solid fa-store"></i> Kasir Offline & Cek Harga</p>
+          </div>
+          <button class="badge-status-online">
+            <span class="status-dot"></span> Offline Database
+          </button>
+        </div>
 
-      <!-- TEST BUTTONS -->
-      <div class="button-group">
-        <button id="btnHapticTest" class="btn-primary">
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
-          Tes Getar (Haptic)
-        </button>
+        <!-- Quick Stats Cards -->
+        <div class="stats-grid">
+          <div class="stat-card card-cyan">
+            <div class="stat-icon"><i class="fa-solid fa-box-archive"></i></div>
+            <div class="stat-info">
+              <span class="stat-value" id="statTotalProducts">0</span>
+              <span class="stat-label">Total Produk</span>
+            </div>
+          </div>
+          <div class="stat-card card-purple">
+            <div class="stat-icon"><i class="fa-solid fa-clock-rotate-left"></i></div>
+            <div class="stat-info">
+              <span class="stat-value" id="statTotalScans">0</span>
+              <span class="stat-label">Total Scan</span>
+            </div>
+          </div>
+        </div>
 
-        <button id="btnCopyTest" class="btn-secondary">
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-          Salin Teks (Clipboard)
-        </button>
-      </div>
+        <!-- Quick Search Bar -->
+        <div class="search-container">
+          <div class="search-box">
+            <i class="fa-solid fa-magnifying-glass search-icon"></i>
+            <input type="text" id="homeSearchInput" placeholder="Cari nama produk atau kode barcode..." />
+            <button class="btn-clear-search hidden" id="btnClearHomeSearch"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          <div id="homeSearchResults" class="search-dropdown hidden"></div>
+        </div>
+
+        <!-- 4 Main Action Cards -->
+        <h3 class="section-title">Menu Utama</h3>
+        <div class="menu-grid">
+          <div class="menu-card menu-scan" id="menuCardScan">
+            <div class="menu-icon-glow"></div>
+            <div class="menu-icon"><i class="fa-solid fa-expand"></i></div>
+            <div class="menu-text">
+              <h4>Scan Barcode</h4>
+              <p>Cepat & Cek Harga</p>
+            </div>
+            <div class="menu-arrow"><i class="fa-solid fa-chevron-right"></i></div>
+          </div>
+
+          <div class="menu-card menu-cashier" id="menuCardCashier">
+            <div class="menu-icon-glow"></div>
+            <div class="menu-icon"><i class="fa-solid fa-cart-shopping"></i></div>
+            <div class="menu-text">
+              <h4>Kasir & Belanja</h4>
+              <p>Hitung Kembalian</p>
+            </div>
+            <div class="menu-arrow"><i class="fa-solid fa-chevron-right"></i></div>
+          </div>
+
+          <div class="menu-card menu-add" id="menuCardAdd">
+            <div class="menu-icon-glow"></div>
+            <div class="menu-icon"><i class="fa-solid fa-plus"></i></div>
+            <div class="menu-text">
+              <h4>Tambah Produk</h4>
+              <p>Input Barang Baru</p>
+            </div>
+            <div class="menu-arrow"><i class="fa-solid fa-chevron-right"></i></div>
+          </div>
+
+          <div class="menu-card menu-list" id="menuCardList">
+            <div class="menu-icon-glow"></div>
+            <div class="menu-icon"><i class="fa-solid fa-list-check"></i></div>
+            <div class="menu-text">
+              <h4>Daftar Produk</h4>
+              <p>Katalog & Stok</p>
+            </div>
+            <div class="menu-arrow"><i class="fa-solid fa-chevron-right"></i></div>
+          </div>
+        </div>
+
+        <!-- Recent Products Section -->
+        <div class="section-header">
+          <h3 class="section-title">Produk Terbaru</h3>
+          <button class="link-btn" id="btnSeeAllProducts">Lihat Semua <i class="fa-solid fa-arrow-right"></i></button>
+        </div>
+
+        <div class="product-list-compact" id="homeRecentProducts">
+          <!-- Rendered via JS -->
+        </div>
+      </section>
+
+      <!-- ==================== 4. SCAN BARCODE VIEW ==================== -->
+      <section id="viewScan" class="app-view hidden">
+        <div class="scanner-page">
+          <div class="scanner-header">
+            <button class="btn-icon-back" id="btnBackFromScan"><i class="fa-solid fa-arrow-left"></i></button>
+            <h3 class="scanner-title">Pindai Barcode</h3>
+            <div class="scanner-actions">
+              <button class="scanner-tool-btn" id="btnToggleFlash" title="Senter">
+                <i class="fa-solid fa-bolt"></i>
+              </button>
+              <button class="scanner-tool-btn" id="btnGalleryScan" title="Ambil Gambar dari Galeri">
+                <i class="fa-solid fa-image"></i>
+              </button>
+              <input type="file" id="fileInputGallery" accept="image/*" class="hidden" />
+            </div>
+          </div>
+
+          <!-- Live Camera Viewport -->
+          <div class="camera-viewport">
+            <div id="html5QrcodeReader"></div>
+            
+            <!-- Custom Laser Overlay -->
+            <div class="scanner-overlay">
+              <div class="scanner-frame">
+                <div class="corner corner-tl"></div>
+                <div class="corner corner-tr"></div>
+                <div class="corner corner-bl"></div>
+                <div class="corner corner-br"></div>
+                <div class="laser-beam"></div>
+              </div>
+              <p class="scanner-hint">Posisikan barcode di dalam kotak bidik</p>
+            </div>
+          </div>
+
+          <!-- Bottom Control Bar -->
+          <div class="scanner-controls">
+            <button class="btn-manual-input" id="btnOpenManualScan">
+              <i class="fa-solid fa-keyboard"></i>
+              <span>Ketik Barcode Manual</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== 5. DAFTAR PRODUK (CATALOG VIEW) ==================== -->
+      <section id="viewProducts" class="app-view hidden">
+        <div class="page-top-bar">
+          <h2>Daftar Produk</h2>
+          <button class="btn-action-primary" id="btnFabAddProduct">
+            <i class="fa-solid fa-plus"></i> Tambah
+          </button>
+        </div>
+
+        <!-- Filter & Search Bar -->
+        <div class="catalog-filters">
+          <div class="search-box">
+            <i class="fa-solid fa-magnifying-glass search-icon"></i>
+            <input type="text" id="catalogSearchInput" placeholder="Cari nama atau barcode..." />
+          </div>
+          <div class="category-pills" id="categoryFilterPills">
+            <button class="pill-btn active" data-cat="all">Semua</button>
+            <button class="pill-btn" data-cat="Makanan">Makanan</button>
+            <button class="pill-btn" data-cat="Minuman">Minuman</button>
+            <button class="pill-btn" data-cat="Sembako">Sembako</button>
+            <button class="pill-btn" data-cat="Lainnya">Lainnya</button>
+          </div>
+        </div>
+
+        <!-- Product Count Info -->
+        <div class="catalog-summary">
+          <span id="catalogCountText">Menampilkan 0 produk</span>
+          <div class="sort-dropdown">
+            <select id="catalogSortSelect">
+              <option value="newest">Terbaru</option>
+              <option value="name_asc">Nama (A-Z)</option>
+              <option value="price_asc">Harga Terendah</option>
+              <option value="price_desc">Harga Tertinggi</option>
+              <option value="stock_asc">Stok Tersedikit</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Products Grid / List -->
+        <div class="products-grid" id="catalogProductList">
+          <!-- Rendered dynamically -->
+        </div>
+      </section>
+
+      <!-- ==================== 6. RIWAYAT SCAN VIEW ==================== -->
+      <section id="viewHistory" class="app-view hidden">
+        <div class="page-top-bar">
+          <h2>Riwayat Scan</h2>
+          <button class="btn-danger-sm" id="btnClearScanHistory">
+            <i class="fa-solid fa-trash-can"></i> Hapus Semua
+          </button>
+        </div>
+        <p class="page-subheading">Daftar produk yang baru saja dipindai atau dicari.</p>
+
+        <div class="history-list" id="scanHistoryList">
+          <!-- Rendered dynamically -->
+        </div>
+      </section>
+
+      <!-- ==================== 7. PENGATURAN & BACKUP VIEW ==================== -->
+      <section id="viewSettings" class="app-view hidden">
+        <div class="page-top-bar">
+          <h2>Pengaturan Toko</h2>
+        </div>
+
+        <div class="settings-group">
+          <h3 class="settings-group-title">Profil Toko</h3>
+          <div class="settings-card">
+            <div class="form-group">
+              <label for="settingStoreName">Nama Toko</label>
+              <input type="text" id="settingStoreName" value="Toko ScanMart" />
+            </div>
+            <div class="form-group">
+              <label for="settingStoreAddress">Alamat / Telepon</label>
+              <input type="text" id="settingStoreAddress" placeholder="Jl. Merdeka No. 45, Telp: 08123456789" />
+            </div>
+            <div class="form-group">
+              <label for="settingReceiptFooter">Pesan Footer Struk</label>
+              <input type="text" id="settingReceiptFooter" value="Terima kasih telah berbelanja!" />
+            </div>
+            <button class="btn-primary-sm" id="btnSaveStoreProfile">
+              <i class="fa-solid fa-floppy-disk"></i> Simpan Profil
+            </button>
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <h3 class="settings-group-title">Kelola & Backup Data</h3>
+          <div class="settings-card">
+            <div class="settings-row">
+              <div class="row-info">
+                <h4>Export / Backup Data (JSON)</h4>
+                <p>Download cadangan seluruh data produk ke file HP.</p>
+              </div>
+              <button class="btn-secondary-sm" id="btnExportData">
+                <i class="fa-solid fa-download"></i> Backup
+              </button>
+            </div>
+            <div class="divider"></div>
+            <div class="settings-row">
+              <div class="row-info">
+                <h4>Restore Data (JSON)</h4>
+                <p>Impor data produk dari file cadangan JSON.</p>
+              </div>
+              <button class="btn-secondary-sm" id="btnRestoreData">
+                <i class="fa-solid fa-upload"></i> Restore
+              </button>
+              <input type="file" id="fileInputRestore" accept=".json" class="hidden" />
+            </div>
+            <div class="divider"></div>
+            <div class="settings-row">
+              <div class="row-info">
+                <h4>Isi Sampel Data Produk</h4>
+                <p>Tambahkan 10+ sampel barang minimarket otomatis untuk uji coba.</p>
+              </div>
+              <button class="btn-purple-sm" id="btnSeedSampleData">
+                <i class="fa-solid fa-wand-magic-sparkles"></i> Isi Sampel
+              </button>
+            </div>
+            <div class="divider"></div>
+            <div class="settings-row">
+              <div class="row-info">
+                <h4 class="text-danger">Reset Semua Data Produk</h4>
+                <p>Hapus seluruh produk dan riwayat dari database HP.</p>
+              </div>
+              <button class="btn-danger-sm" id="btnResetAllData">
+                <i class="fa-solid fa-trash-arrow-up"></i> Reset
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <h3 class="settings-group-title">Tentang Aplikasi</h3>
+          <div class="settings-card about-card">
+            <div class="app-info-badge">
+              <i class="fa-solid fa-barcode text-neon"></i>
+              <div>
+                <h4>ScanMart v1.0.0</h4>
+                <p>Built with Capacitor 7 & Offline Database</p>
+              </div>
+            </div>
+            <p class="about-desc">ScanMart dirancang untuk mempermudah pemilik toko dalam mengecek harga, mengelola stok, dan melakukan transaksi kasir kilat offline.</p>
+          </div>
+        </div>
+      </section>
+
     </main>
 
-    <!-- FOOTER -->
-    <footer class="app-footer">
-      <p>Powered by <strong>Capacitor 7</strong> & <strong>GitHub Actions</strong></p>
-    </footer>
+    <!-- BOTTOM NAVIGATION BAR -->
+    <nav class="bottom-nav">
+      <button class="nav-item active" data-view="viewHome">
+        <i class="fa-solid fa-house"></i>
+        <span>Beranda</span>
+      </button>
+      <button class="nav-item" data-view="viewProducts">
+        <i class="fa-solid fa-boxes-stacked"></i>
+        <span>Produk</span>
+      </button>
+      
+      <!-- Big Center Floating Scan Button -->
+      <div class="nav-scan-wrapper">
+        <button class="nav-scan-btn" id="btnNavScan" title="Scan Barcode">
+          <div class="scan-pulse"></div>
+          <i class="fa-solid fa-barcode"></i>
+        </button>
+      </div>
+      
+      <button class="nav-item" data-view="viewHistory">
+        <i class="fa-solid fa-clock-rotate-left"></i>
+        <span>Riwayat</span>
+      </button>
+      <button class="nav-item" data-view="viewSettings">
+        <i class="fa-solid fa-gear"></i>
+        <span>Setelan</span>
+      </button>
+    </nav>
 
   </div>
 
-  <script type="module" src="app.js"></script>
+
+  <!-- ==================== MODALS & DRAWERS ==================== -->
+
+  <!-- 8. MODAL: HASIL SCAN / DETAIL PRODUK -->
+  <div id="modalProductDetail" class="modal-overlay hidden">
+    <div class="modal-card modal-bottom-sheet">
+      <div class="modal-header">
+        <span class="badge-tag" id="detailCategoryBadge">Umum</span>
+        <button class="modal-close-btn" data-close="modalProductDetail"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <div class="modal-body">
+        <div class="detail-product-hero">
+          <div class="detail-img-container">
+            <img id="detailProductImage" src="" alt="Foto Produk" />
+            <div class="detail-img-placeholder" id="detailImagePlaceholder">
+              <i class="fa-solid fa-box-open"></i>
+            </div>
+          </div>
+          <div class="detail-hero-info">
+            <h3 id="detailProductName">Nama Produk</h3>
+            <div class="barcode-chip">
+              <i class="fa-solid fa-barcode"></i>
+              <span id="detailBarcodeText">8999999000</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Metrics Grid (Harga Jual, Beli, Margin, Stok) -->
+        <div class="metrics-grid">
+          <div class="metric-card card-sell-price">
+            <span class="metric-label">Harga Jual</span>
+            <span class="metric-value text-neon-green" id="detailSellPrice">Rp 0</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Harga Beli</span>
+            <span class="metric-value" id="detailBuyPrice">Rp 0</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Margin Keuntungan</span>
+            <span class="metric-value text-neon-cyan" id="detailMargin">Rp 0</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Stok Barang</span>
+            <span class="metric-value" id="detailStock">0 pcs</span>
+          </div>
+        </div>
+
+        <div class="detail-actions">
+          <button class="btn-success-lg" id="btnAddCartFromDetail">
+            <i class="fa-solid fa-cart-plus"></i> Tambah ke Kasir
+          </button>
+          <div class="action-btn-row">
+            <button class="btn-secondary-flex" id="btnEditFromDetail">
+              <i class="fa-solid fa-pen-to-square"></i> Edit
+            </button>
+            <button class="btn-secondary-flex" id="btnScanAgainFromDetail">
+              <i class="fa-solid fa-expand"></i> Scan Lagi
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 9. MODAL: PRODUK TIDAK DITEMUKAN (OFFER ADD) -->
+  <div id="modalNotFound" class="modal-overlay hidden">
+    <div class="modal-card modal-center">
+      <div class="empty-state-icon">
+        <i class="fa-solid fa-circle-exclamation text-amber"></i>
+      </div>
+      <h3>Produk Belum Terdaftar!</h3>
+      <p class="modal-subtitle">Barcode <strong id="notFoundBarcodeText" class="text-neon">8999999</strong> belum ada di database toko Anda.</p>
+      
+      <div class="modal-buttons-stacked">
+        <button class="btn-primary" id="btnCreateWithBarcode">
+          <i class="fa-solid fa-plus"></i> Tambah Produk Baru
+        </button>
+        <button class="btn-secondary" data-close="modalNotFound">
+          Tutup & Scan Lainnya
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 10. MODAL: TAMBAH / EDIT PRODUK FORM -->
+  <div id="modalProductForm" class="modal-overlay hidden">
+    <div class="modal-card modal-full">
+      <div class="modal-header">
+        <h3 id="formTitle">Tambah Produk Baru</h3>
+        <button class="modal-close-btn" data-close="modalProductForm"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <form id="productForm" class="modal-body scrollable-body">
+        <input type="hidden" id="formProductId" value="" />
+
+        <!-- Image Upload Field -->
+        <div class="form-group center-upload">
+          <label>Foto Produk (Opsional)</label>
+          <div class="image-picker-preview" id="btnTriggerImagePicker">
+            <img id="formImagePreview" src="" class="hidden" />
+            <div id="formImagePlaceholder" class="picker-placeholder">
+              <i class="fa-solid fa-camera"></i>
+              <span>Pilih / Upload Foto</span>
+            </div>
+          </div>
+          <input type="file" id="formFileInput" accept="image/*" class="hidden" />
+          <input type="hidden" id="formImageData" value="" />
+        </div>
+
+        <!-- Barcode Field with Scan Button -->
+        <div class="form-group">
+          <label for="formBarcode">Kode Barcode <span class="required">*</span></label>
+          <div class="input-with-button">
+            <input type="text" id="formBarcode" placeholder="Contoh: 8992741987012" required />
+            <button type="button" class="btn-input-scan" id="btnScanForForm" title="Scan Barcode">
+              <i class="fa-solid fa-barcode"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Product Name -->
+        <div class="form-group">
+          <label for="formName">Nama Produk <span class="required">*</span></label>
+          <input type="text" id="formName" placeholder="Contoh: Indomie Goreng Spesial 85g" required />
+        </div>
+
+        <!-- Category -->
+        <div class="form-group">
+          <label for="formCategory">Kategori</label>
+          <select id="formCategory">
+            <option value="Makanan">Makanan</option>
+            <option value="Minuman">Minuman</option>
+            <option value="Sembako">Sembako</option>
+            <option value="Obat & Kesehatan">Obat & Kesehatan</option>
+            <option value="Rokok">Rokok</option>
+            <option value="Pembersih & Sabun">Pembersih & Sabun</option>
+            <option value="Lainnya">Lainnya</option>
+          </select>
+        </div>
+
+        <!-- Pricing Grid -->
+        <div class="form-row-2">
+          <div class="form-group">
+            <label for="formSellPrice">Harga Jual (Rp) <span class="required">*</span></label>
+            <input type="number" id="formSellPrice" placeholder="3500" min="0" required />
+          </div>
+          <div class="form-group">
+            <label for="formBuyPrice">Harga Beli (Rp)</label>
+            <input type="number" id="formBuyPrice" placeholder="3000 (Opsional)" min="0" />
+          </div>
+        </div>
+
+        <!-- Stock & Auto Margin Display -->
+        <div class="form-row-2">
+          <div class="form-group">
+            <label for="formStock">Stok Saat Ini</label>
+            <input type="number" id="formStock" placeholder="50" min="0" value="0" />
+          </div>
+          <div class="form-group">
+            <label>Estimasi Margin</label>
+            <div class="read-only-box" id="formMarginPreview">Rp 0</div>
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="btn-danger hidden" id="btnDeleteProductFromForm">
+            <i class="fa-solid fa-trash-can"></i> Hapus Produk
+          </button>
+          <button type="submit" class="btn-primary-lg" id="btnSaveProduct">
+            <i class="fa-solid fa-floppy-disk"></i> Simpan Produk
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 11. MODAL: WARNING DUPLIKAT BARCODE -->
+  <div id="modalDuplicateBarcode" class="modal-overlay hidden">
+    <div class="modal-card modal-center">
+      <div class="warning-icon-ring">
+        <i class="fa-solid fa-triangle-exclamation text-danger"></i>
+      </div>
+      <h3 class="text-danger">Barcode Sudah Terdaftar!</h3>
+      <p class="modal-subtitle">Kode barcode <strong id="duplicateBarcodeNum">899999</strong> sudah dipakai oleh produk: <strong id="duplicateProductName" class="text-neon">Indomie Goreng</strong>.</p>
+
+      <div class="modal-buttons">
+        <button class="btn-secondary" data-close="modalDuplicateBarcode">Tutup</button>
+        <button class="btn-primary" id="btnViewDuplicateProduct">Lihat Produk</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 12. MODAL: KONFIRMASI HAPUS PRODUK -->
+  <div id="modalConfirmDelete" class="modal-overlay hidden">
+    <div class="modal-card modal-center">
+      <div class="danger-icon-ring">
+        <i class="fa-solid fa-trash-can text-danger"></i>
+      </div>
+      <h3>Hapus Produk Ini?</h3>
+      <p class="modal-subtitle">Produk <strong id="deleteTargetName">Indomie Goreng</strong> akan dihapus permanen dari database HP Anda.</p>
+
+      <div class="modal-buttons">
+        <button class="btn-secondary" data-close="modalConfirmDelete">Batal</button>
+        <button class="btn-danger" id="btnConfirmDeleteExecution">Ya, Hapus</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 13. MODAL: INPUT BARCODE MANUAL -->
+  <div id="modalManualInput" class="modal-overlay hidden">
+    <div class="modal-card modal-center">
+      <div class="modal-header">
+        <h3>Input Barcode Manual</h3>
+        <button class="modal-close-btn" data-close="modalManualInput"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="manualBarcodeCode">Masukkan Kode Barcode</label>
+          <input type="text" id="manualBarcodeCode" placeholder="Contoh: 8999999001" autofocus />
+        </div>
+        <button class="btn-primary-lg" id="btnSubmitManualScan">
+          <i class="fa-solid fa-magnifying-glass"></i> Cari & Cek Harga
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 14. MODAL / DRAWER: KASIR & KERANJANG BELANJA (POS CASHIER) -->
+  <div id="modalCashierCart" class="modal-overlay hidden">
+    <div class="modal-card modal-full">
+      <div class="modal-header">
+        <div class="header-title-flex">
+          <i class="fa-solid fa-cart-shopping text-neon-green"></i>
+          <h3>Kasir & Keranjang Belanja</h3>
+        </div>
+        <button class="modal-close-btn" data-close="modalCashierCart"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <div class="modal-body cashier-body">
+        <!-- Quick Scan Button inside Cashier -->
+        <div class="cashier-scan-bar">
+          <button class="btn-scan-cashier" id="btnCashierScanItem">
+            <i class="fa-solid fa-barcode"></i> Scan Barang Masuk Keranjang
+          </button>
+          <button class="btn-clear-cart" id="btnClearCartItems">
+            <i class="fa-solid fa-trash"></i> Kosongkan
+          </button>
+        </div>
+
+        <!-- Cart Items List -->
+        <div class="cart-items-list" id="cartItemsContainer">
+          <!-- Rendered via JS -->
+        </div>
+
+        <!-- Payment Calculation Summary -->
+        <div class="cashier-payment-section">
+          <div class="total-display-card">
+            <span class="total-label">Total Belanja</span>
+            <span class="total-amount text-neon-green" id="cartTotalDisplay">Rp 0</span>
+          </div>
+
+          <!-- Cash Received Input & Shortcuts -->
+          <div class="form-group">
+            <label for="inputCashReceived">Uang Pembeli (Tunai)</label>
+            <input type="number" id="inputCashReceived" placeholder="0" min="0" />
+            <div class="cash-shortcuts">
+              <button class="btn-cash-tag" id="btnCashExact">Pas</button>
+              <button class="btn-cash-tag" data-val="10000">10k</button>
+              <button class="btn-cash-tag" data-val="20000">20k</button>
+              <button class="btn-cash-tag" data-val="50000">50k</button>
+              <button class="btn-cash-tag" data-val="100000">100k</button>
+            </div>
+          </div>
+
+          <!-- Change Due Display -->
+          <div class="change-due-card" id="changeDueCard">
+            <span class="change-label">Kembalian:</span>
+            <span class="change-amount" id="cartChangeDisplay">Rp 0</span>
+          </div>
+
+          <button class="btn-checkout-lg" id="btnFinishTransaction">
+            <i class="fa-solid fa-circle-check"></i> Selesaikan Transaksi
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 15. MODAL: STRUK / BUKTI TRANSAKSI SUKSES -->
+  <div id="modalReceipt" class="modal-overlay hidden">
+    <div class="modal-card modal-center receipt-modal">
+      <div class="receipt-paper" id="receiptPrintArea">
+        <div class="receipt-header">
+          <i class="fa-solid fa-shop receipt-logo"></i>
+          <h3 id="receiptStoreName">Toko ScanMart</h3>
+          <p id="receiptStoreAddress">Kasir Offline & Cek Harga</p>
+          <div class="receipt-dashed-line"></div>
+          <p class="receipt-date" id="receiptDate">30 Sep 2026 12:00</p>
+        </div>
+
+        <div class="receipt-items" id="receiptItemsList">
+          <!-- Rendered via JS -->
+        </div>
+
+        <div class="receipt-dashed-line"></div>
+
+        <div class="receipt-totals">
+          <div class="receipt-row">
+            <span>Total Belanja:</span>
+            <strong id="receiptTotal">Rp 0</strong>
+          </div>
+          <div class="receipt-row">
+            <span>Uang Tunai:</span>
+            <span id="receiptCash">Rp 0</span>
+          </div>
+          <div class="receipt-row">
+            <span>Kembalian:</span>
+            <strong id="receiptChange" class="text-neon-green">Rp 0</strong>
+          </div>
+        </div>
+
+        <div class="receipt-dashed-line"></div>
+        <p class="receipt-footer" id="receiptFooterText">Terima kasih telah berbelanja!</p>
+      </div>
+
+      <div class="receipt-actions">
+        <button class="btn-primary-lg" id="btnCloseReceipt">
+          <i class="fa-solid fa-check"></i> Selesai
+        </button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ==================== SCRIPTS ==================== -->
+  <!-- 1. Html5Qrcode Library (Offline Minified JS) -->
+  <script src="js/html5-qrcode.min.js"></script>
+  <!-- 2. Application Core Logic -->
+  <script src="app.js"></script>
 </body>
 </html>

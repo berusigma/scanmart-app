@@ -1,4 +1,4 @@
-package com.mysimplestart.app;
+package com.scanmart.app;
 
 import com.getcapacitor.BridgeActivity;
 

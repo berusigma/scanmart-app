@@ -1,7 +1,7 @@
 {
-  "name": "capacitor-starter",
+  "name": "scanmart-app",
   "version": "1.0.0",
-  "description": "Multi-Platform Template Starter (Android, iOS & Windows) dengan GitHub Actions Builder",
+  "description": "ScanMart — Aplikasi Scan Barcode, Cek Harga Barang & Kasir Toko Lintas Platform (Android, iOS, Windows & macOS)",
   "main": "public/index.html",
   "scripts": {
     "cap:sync": "node node_modules/@capacitor/cli/bin/capacitor sync",
@@ -10,8 +10,22 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"
   },
-  "keywords": ["capacitor", "android", "ios", "windows", "tauri", "template"],
+  "keywords": [
+    "scanmart",
+    "barcode-scanner",
+    "kasir-toko",
+    "capacitor",
+    "android",
+    "ios",
+    "windows",
+    "tauri",
+    "template"
+  ],
   "author": "berusigma",
+  "contributors": [
+    "berusigma <https://github.com/berusigma>",
+    "Antigravity AI (@antigravity) <https://github.com/antigravity>"
+  ],
   "license": "MIT",
   "type": "module",
   "dependencies": {

@@ -1,6 +1,6 @@
 {
-  "appId": "com.mysimplestart.app",
-  "appName": "Capacitor Starter",
+  "appId": "com.scanmart.app",
+  "appName": "ScanMart",
   "webDir": "public",
   "plugins": {
     "CapacitorHttp": {
