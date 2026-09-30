@@ -23,8 +23,7 @@ let appState = {
   activeScanner: null,
   isScanning: false,
   targetDeleteId: null,
-  duplicateProductTarget: null,
-  localProductsMemory: [] // Fallback memory store if IndexedDB is blocked
+  duplicateProductTarget: null
 };
 
 // ==================== 2. AUDIO & HAPTIC FEEDBACK ====================
@@ -64,7 +63,7 @@ function triggerHaptic() {
   } catch (e) {}
 }
 
-// ==================== 3. DATABASE ENGINE (INDEXEDDB WITH LOCALSTORAGE FALLBACK) ====================
+// ==================== 3. DATABASE ENGINE ====================
 function initDatabase() {
   return new Promise((resolve) => {
     try {
@@ -94,7 +93,7 @@ function initDatabase() {
 
       request.onerror = (e) => {
         console.warn("IndexedDB open error:", e);
-        resolve(null); // Resolve null to allow fallback without hanging!
+        resolve(null);
       };
     } catch (err) {
       console.warn("IndexedDB init exception:", err);
@@ -145,7 +144,6 @@ async function dbSaveProduct(productData) {
         const req = productData.id ? store.put(productData) : store.add(productData);
         req.onsuccess = () => resolve(req.result);
         req.onerror = () => {
-          // Fallback to LS
           saveLSHelper(productData);
           resolve(true);
         };
@@ -217,10 +215,16 @@ async function dbClearScanHistory() {
   return true;
 }
 
-// Seed Initial Sample Data
-async function seedSampleDataIfNeeded() {
+// Seed Sample Data (ONLY ONCE PER INSTALL, NEVER RE-SEED IF CLEARED BY USER)
+async function seedSampleDataIfNeeded(force = false) {
+  const isAlreadySeeded = localStorage.getItem("scanmart_seeded_done") === "true";
+  
+  if (isAlreadySeeded && !force) {
+    return; // Don't auto-re-seed if user already cleared data or used the app!
+  }
+
   const products = await dbGetAllProducts();
-  if (products.length === 0) {
+  if (products.length === 0 || force) {
     const samples = [
       { id: 1, barcode: "8999999001", name: "Indomie Goreng Spesial 85g", category: "Makanan", sellPrice: 3500, buyPrice: 3000, stock: 120, image: "" },
       { id: 2, barcode: "8992741987012", name: "Aqua Air Mineral 600ml", category: "Minuman", sellPrice: 4000, buyPrice: 3200, stock: 85, image: "" },
@@ -235,6 +239,8 @@ async function seedSampleDataIfNeeded() {
       await dbSaveProduct(item);
     }
   }
+  
+  localStorage.setItem("scanmart_seeded_done", "true");
 }
 
 // ==================== 4. DOM ELEMENTS SAFE GETTER ====================
@@ -355,7 +361,7 @@ async function onBarcodeScannedSuccess(decodedText) {
   }
 }
 
-// ==================== 8. PRODUCT DETAIL & NOT FOUND MODALS ====================
+// ==================== 8. PRODUCT DETAIL MODAL ====================
 function showProductDetailModal(product) {
   getEl("detailCategoryBadge").textContent = product.category || "Umum";
   getEl("detailProductName").textContent = product.name;
@@ -1024,6 +1030,7 @@ function bindEventListeners() {
                 delete item.id;
                 await dbSaveProduct(item);
               }
+              localStorage.setItem("scanmart_seeded_done", "true");
               alert(`Berhasil mengimpor ${parsed.products.length} produk!`);
               renderHomeView();
               renderCatalogView();
@@ -1037,8 +1044,8 @@ function bindEventListeners() {
 
   if (getEl("btnSeedSampleData")) {
     getEl("btnSeedSampleData").addEventListener("click", async () => {
-      await seedSampleDataIfNeeded();
-      alert("Sampel data minimarket dimasukkan!");
+      await seedSampleDataIfNeeded(true); // force seed!
+      alert("Sampel data minimarket berhasil dimasukkan!");
       renderHomeView();
       renderCatalogView();
     });
@@ -1046,11 +1053,13 @@ function bindEventListeners() {
 
   if (getEl("btnResetAllData")) {
     getEl("btnResetAllData").addEventListener("click", async () => {
-      if (confirm("Hapus seluruh data produk?")) {
+      if (confirm("APAKAH ANDA YAKIN? Seluruh produk dan riwayat akan dihapus permanen!")) {
         const products = await dbGetAllProducts();
         for (const p of products) await dbDeleteProduct(p.id);
         await dbClearScanHistory();
-        alert("Database dikosongkan.");
+        localStorage.setItem("scanmart_products_ls", "[]"); // Clear LS backup too!
+        localStorage.setItem("scanmart_seeded_done", "true"); // Prevent auto re-seeding!
+        alert("Database berhasil dikosongkan.");
         renderHomeView();
         renderCatalogView();
       }
@@ -1158,11 +1167,10 @@ async function initApp() {
   }
 }
 
-// Robust bootstrap caller (handles DOM ready or already loaded state)
+// Robust bootstrap caller
 if (document.readyState === "complete" || document.readyState === "interactive") {
   initApp();
 } else {
   document.addEventListener("DOMContentLoaded", initApp);
-  // Fallback timer in case DOMContentLoaded event was missed
   setTimeout(initApp, 800);
 }
