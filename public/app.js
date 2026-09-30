@@ -363,7 +363,7 @@ function applyTheme(theme) {
 }
 
 // ==================== 7. SCANNER ENGINE ====================
-function startCameraScanner() {
+async function startCameraScanner() {
   if (appState.isScanning) return;
   appState.isScanning = true;
 
@@ -379,20 +379,24 @@ function startCameraScanner() {
     }
   }
 
+  // 1. Trigger explicit browser/WebView camera permission prompt
+  try {
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      const initStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      // Release temporary stream immediately so Html5Qrcode can claim the hardware
+      initStream.getTracks().forEach(track => track.stop());
+    }
+  } catch (errPerm) {
+    console.warn("Camera permission prompt error:", errPerm);
+  }
+
+  // 2. Initialize Html5Qrcode instance
   try {
     if (!appState.activeScanner && window.Html5Qrcode) {
       appState.activeScanner = new Html5Qrcode("html5QrcodeReader");
     }
 
     if (appState.activeScanner) {
-      // High-resolution camera constraints for crisp EAN/UPC barcode recognition & continuous focus
-      const cameraConstraints = {
-        facingMode: "environment",
-        width: { min: 640, ideal: 1920, max: 3840 },
-        height: { min: 480, ideal: 1080, max: 2160 },
-        focusMode: "continuous"
-      };
-
       const config = {
         fps: 20,
         qrbox: function(viewfinderWidth, viewfinderHeight) {
@@ -406,23 +410,35 @@ function startCameraScanner() {
         }
       };
 
-      appState.activeScanner.start(
-        cameraConstraints,
+      // 3. Try opening camera by device ID (back camera) or environment facing mode
+      try {
+        const devices = await Html5Qrcode.getCameras();
+        if (devices && devices.length > 0) {
+          const backCam = devices.find(d => /back|rear|belakang|environment/i.test(d.label)) || devices[devices.length - 1];
+          await appState.activeScanner.start(
+            backCam.id,
+            config,
+            onBarcodeScannedSuccess,
+            () => {}
+          );
+          return;
+        }
+      } catch (errDev) {
+        console.warn("getCameras failed, using facingMode fallback:", errDev);
+      }
+
+      // Fallback: facingMode object
+      await appState.activeScanner.start(
+        { facingMode: "environment" },
         config,
         onBarcodeScannedSuccess,
         () => {}
-      ).catch(err => {
-        console.warn("HD camera start catch, falling back to basic camera mode:", err);
-        appState.activeScanner.start(
-          { facingMode: "environment" },
-          { fps: 15, qrbox: { width: 240, height: 240 }, aspectRatio: 1.0 },
-          onBarcodeScannedSuccess,
-          () => {}
-        ).catch(err2 => console.warn("Fallback camera start error:", err2));
-      });
+      );
     }
   } catch (e) {
     console.warn("Scanner exception:", e);
+    appState.isScanning = false;
+    alert("⚠️ Kamera tidak dapat diakses. Pastikan Anda telah memberikan izin kamera pada aplikasi ScanMart di Pengaturan HP Anda.");
   }
 }
 
