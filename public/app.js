@@ -22,9 +22,25 @@ let appState = {
   scannedBarcode: null,
   activeScanner: null,
   isScanning: false,
+  cashierScanMode: false,
+  lastScannedBarcode: null,
+  lastScanTimestamp: 0,
   targetDeleteId: null,
   duplicateProductTarget: null
 };
+
+function showToastBanner(message, type = "success") {
+  const banner = getEl("scannerToastBanner");
+  if (!banner) return;
+  banner.textContent = message;
+  banner.className = `scanner-toast ${type === "error" ? "error" : "success"}`;
+  banner.classList.remove("hidden");
+  banner.classList.add("show");
+  if (window.toastTimeout) clearTimeout(window.toastTimeout);
+  window.toastTimeout = setTimeout(() => {
+    banner.classList.remove("show");
+  }, 2200);
+}
 
 // ==================== 2. AUDIO & HAPTIC FEEDBACK ====================
 let audioCtx = null;
@@ -331,20 +347,58 @@ function startCameraScanner() {
   if (appState.isScanning) return;
   appState.isScanning = true;
 
+  // Manage cashier mode top status banner
+  const cashierBanner = getEl("cashierScanBanner");
+  if (cashierBanner) {
+    if (appState.cashierScanMode) {
+      cashierBanner.classList.remove("hidden");
+      const countEl = getEl("cashierItemCountText");
+      if (countEl) countEl.textContent = appState.cart.reduce((sum, item) => sum + item.qty, 0);
+    } else {
+      cashierBanner.classList.add("hidden");
+    }
+  }
+
   try {
     if (!appState.activeScanner && window.Html5Qrcode) {
       appState.activeScanner = new Html5Qrcode("html5QrcodeReader");
     }
 
     if (appState.activeScanner) {
-      const config = { fps: 15, qrbox: { width: 240, height: 240 }, aspectRatio: 1.0 };
+      // High-resolution camera constraints for crisp EAN/UPC barcode recognition & continuous focus
+      const cameraConstraints = {
+        facingMode: "environment",
+        width: { min: 640, ideal: 1920, max: 3840 },
+        height: { min: 480, ideal: 1080, max: 2160 },
+        focusMode: "continuous"
+      };
+
+      const config = {
+        fps: 20,
+        qrbox: function(viewfinderWidth, viewfinderHeight) {
+          const minDim = Math.min(viewfinderWidth, viewfinderHeight);
+          const boxSize = Math.floor(minDim * 0.75);
+          return { width: boxSize, height: boxSize };
+        },
+        aspectRatio: 1.0,
+        experimentalFeatures: {
+          useBarCodeDetectorIfSupported: true
+        }
+      };
+
       appState.activeScanner.start(
-        { facingMode: "environment" },
+        cameraConstraints,
         config,
         onBarcodeScannedSuccess,
         () => {}
       ).catch(err => {
-        console.warn("Camera start catch:", err);
+        console.warn("HD camera start catch, falling back to basic camera mode:", err);
+        appState.activeScanner.start(
+          { facingMode: "environment" },
+          { fps: 15, qrbox: { width: 240, height: 240 }, aspectRatio: 1.0 },
+          onBarcodeScannedSuccess,
+          () => {}
+        ).catch(err2 => console.warn("Fallback camera start error:", err2));
       });
     }
   } catch (e) {
@@ -353,27 +407,62 @@ function startCameraScanner() {
 }
 
 function stopCameraScanner() {
-  if (appState.activeScanner && appState.isScanning) {
+  appState.isScanning = false;
+  if (appState.activeScanner) {
     appState.activeScanner.stop().then(() => {
-      appState.isScanning = false;
+      releaseCameraTracks();
     }).catch(() => {
-      appState.isScanning = false;
+      releaseCameraTracks();
     });
   } else {
-    appState.isScanning = false;
+    releaseCameraTracks();
   }
 }
 
+function releaseCameraTracks() {
+  try {
+    const videoEls = document.querySelectorAll("#html5QrcodeReader video, video");
+    videoEls.forEach(v => {
+      if (v.srcObject && v.srcObject.getTracks) {
+        v.srcObject.getTracks().forEach(track => track.stop());
+        v.srcObject = null;
+      }
+    });
+  } catch (e) {}
+}
+
 async function onBarcodeScannedSuccess(decodedText) {
+  // Cooldown protection: ignore duplicate rapid scan of exact same code within 1.5s
+  const now = Date.now();
+  if (appState.lastScannedBarcode === decodedText && (now - appState.lastScanTimestamp < 1500)) {
+    return;
+  }
+  appState.lastScannedBarcode = decodedText;
+  appState.lastScanTimestamp = now;
+
   playBeepSound();
   triggerHaptic();
   
   appState.scannedBarcode = decodedText;
-  stopCameraScanner();
-  
   const product = await dbGetProductByBarcode(decodedText);
   await dbAddScanHistory(product);
-  
+
+  // CASHIER CONTINUOUS MULTI-ITEM SCAN MODE
+  if (appState.cashierScanMode) {
+    if (product) {
+      addToCart(product);
+      const countEl = getEl("cashierItemCountText");
+      if (countEl) countEl.textContent = appState.cart.reduce((sum, item) => sum + item.qty, 0);
+      showToastBanner(`✅ Ditambahkan: ${product.name} (${formatRupiah(product.sellPrice)})`, "success");
+    } else {
+      showToastBanner(`⚠️ Barcode ${decodedText} belum terdaftar di toko!`, "error");
+    }
+    // DO NOT stop camera scanner in cashier mode, allow continuous scanning!
+    return;
+  }
+
+  // SINGLE ITEM DETAIL VIEW SCAN MODE
+  stopCameraScanner();
   if (product) {
     showProductDetailModal(product);
   } else {
@@ -953,7 +1042,15 @@ function bindEventListeners() {
   if (getEl("btnCashierScanItem")) {
     getEl("btnCashierScanItem").addEventListener("click", () => {
       closeModal(getEl("modalCashierCart"));
+      appState.cashierScanMode = true;
       switchView("viewScan");
+    });
+  }
+  if (getEl("btnFinishCashierScan")) {
+    getEl("btnFinishCashierScan").addEventListener("click", () => {
+      appState.cashierScanMode = false;
+      stopCameraScanner();
+      openModal(getEl("modalCashierCart"));
     });
   }
   if (getEl("btnHeaderCart")) {
@@ -1181,7 +1278,17 @@ function bindEventListeners() {
   if (getEl("btnNavScan")) getEl("btnNavScan").onclick = () => switchView("viewScan");
   if (getEl("btnFabAddProduct")) getEl("btnFabAddProduct").onclick = () => openProductForm();
   if (getEl("btnSeeAllProducts")) getEl("btnSeeAllProducts").onclick = () => switchView("viewProducts");
-  if (getEl("btnBackFromScan")) getEl("btnBackFromScan").onclick = () => switchView("viewHome");
+  if (getEl("btnBackFromScan")) {
+    getEl("btnBackFromScan").onclick = () => {
+      if (appState.cashierScanMode) {
+        appState.cashierScanMode = false;
+        stopCameraScanner();
+        openModal(getEl("modalCashierCart"));
+      } else {
+        switchView("viewHome");
+      }
+    };
+  }
 
   document.querySelectorAll(".nav-item").forEach(item => {
     item.addEventListener("click", () => switchView(item.dataset.view));

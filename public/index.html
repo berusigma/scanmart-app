@@ -90,7 +90,7 @@
   <!-- ==================== APP CONTAINER (MAIN SHELL) ==================== -->
   <div id="appShell" class="app-shell hidden">
     
-    <!-- TOP NAVBAR -->
+    <!-- TOP NAVBAR WITH SAFE AREA SPACING -->
     <header class="app-header">
       <div class="header-left">
         <div class="brand-badge">
@@ -214,9 +214,27 @@
       <!-- ==================== 4. SCAN BARCODE VIEW ==================== -->
       <section id="viewScan" class="app-view hidden">
         <div class="scanner-page">
+          
+          <!-- Top Cashier Continuous Scan Banner -->
+          <div id="cashierScanBanner" class="cashier-scan-banner hidden">
+            <div class="banner-content">
+              <i class="fa-solid fa-cart-shopping text-neon-green"></i>
+              <span id="cashierScanStatusText">Mode Kasir: Scan barang ke Keranjang</span>
+            </div>
+            <button class="btn-done-cashier-scan" id="btnDoneCashierScan">
+              <i class="fa-solid fa-check"></i> Selesai
+            </button>
+          </div>
+
+          <!-- Toast Floating Banner -->
+          <div id="scannerToastBanner" class="scanner-toast-banner hidden">
+            <i class="fa-solid fa-circle-check text-neon-green"></i>
+            <span id="scannerToastText">Item ditambahkan!</span>
+          </div>
+
           <div class="scanner-header">
-            <button class="btn-icon-back" id="btnBackFromScan"><i class="fa-solid fa-arrow-left"></i></button>
-            <h3 class="scanner-title">Pindai Barcode</h3>
+            <button class="btn-icon-back" id="btnBackFromScan" title="Kembali"><i class="fa-solid fa-arrow-left"></i></button>
+            <h3 class="scanner-title" id="scanPageTitle">Pindai Barcode</h3>
             <div class="scanner-actions">
               <button class="scanner-tool-btn" id="btnToggleFlash" title="Senter">
                 <i class="fa-solid fa-bolt"></i>
@@ -232,13 +250,14 @@
           <div class="camera-viewport">
             <div id="html5QrcodeReader"></div>
             
-            <!-- Custom Laser Overlay -->
+            <!-- Custom Laser Overlay with Central Viewfinder Box & Crosshair -->
             <div class="scanner-overlay">
               <div class="scanner-frame">
                 <div class="corner corner-tl"></div>
                 <div class="corner corner-tr"></div>
                 <div class="corner corner-bl"></div>
                 <div class="corner corner-br"></div>
+                <div class="center-crosshair"></div>
                 <div class="laser-beam"></div>
               </div>
               <p class="scanner-hint">Posisikan barcode di dalam kotak bidik</p>
