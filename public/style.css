@@ -1915,3 +1915,33 @@ body {
   0% { transform: translateX(0); }
   100% { transform: translateX(150%); }
 }
+
+/* Photo Upload Options Row */
+.photo-options-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+  width: 100%;
+}
+
+.btn-photo-opt {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-photo-opt:active {
+  transform: scale(0.97);
+  background: var(--bg-card-hover);
+}

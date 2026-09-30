@@ -550,17 +550,26 @@
       <form id="productForm" class="modal-body scrollable-body">
         <input type="hidden" id="formProductId" value="" />
 
-        <!-- Image Upload Field -->
+        <!-- Image Upload Field with Camera & Gallery Support -->
         <div class="form-group center-upload">
           <label>Foto Produk (Opsional)</label>
           <div class="image-picker-preview" id="btnTriggerImagePicker">
             <img id="formImagePreview" src="" class="hidden" />
             <div id="formImagePlaceholder" class="picker-placeholder">
               <i class="fa-solid fa-camera"></i>
-              <span>Pilih / Upload Foto</span>
+              <span>Foto Produk</span>
             </div>
           </div>
-          <input type="file" id="formFileInput" accept="image/*" class="hidden" />
+          <div class="photo-options-row">
+            <button type="button" class="btn-photo-opt" id="btnTriggerCameraPicker">
+              <i class="fa-solid fa-camera text-neon-cyan"></i> Ambil Foto Kamera
+            </button>
+            <button type="button" class="btn-photo-opt" id="btnTriggerGalleryPicker">
+              <i class="fa-solid fa-image text-neon-green"></i> Pilih dari Galeri
+            </button>
+          </div>
+          <input type="file" id="formFileInputCamera" accept="image/*" capture="environment" class="hidden" />
+          <input type="file" id="formFileInputGallery" accept="image/*" class="hidden" />
           <input type="hidden" id="formImageData" value="" />
         </div>
 

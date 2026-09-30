@@ -814,6 +814,45 @@ async function renderHistoryView() {
 }
 
 // ==================== 13. HELPER UTILITIES ====================
+function compressProductImage(file, callback) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      let width = img.width;
+      let height = img.height;
+      const maxDim = 600;
+
+      if (width > height) {
+        if (width > maxDim) {
+          height = Math.round((height * maxDim) / width);
+          width = maxDim;
+        }
+      } else {
+        if (height > maxDim) {
+          width = Math.round((width * maxDim) / height);
+          height = maxDim;
+        }
+      }
+
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, width, height);
+
+      const base64 = canvas.toDataURL("image/jpeg", 0.75);
+      callback(base64);
+    };
+    img.onerror = () => {
+      callback(e.target.result);
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
 function formatRupiah(number) {
   return new Intl.NumberFormat("id-ID", {
     style: "currency",
@@ -898,25 +937,37 @@ function bindEventListeners() {
     });
   }
 
-  // Image Picker
+  // Image Picker with Camera & Gallery Support
   if (getEl("btnTriggerImagePicker")) {
-    getEl("btnTriggerImagePicker").addEventListener("click", () => getEl("formFileInput")?.click());
+    getEl("btnTriggerImagePicker").addEventListener("click", () => getEl("formFileInputGallery")?.click());
   }
-  if (getEl("formFileInput")) {
-    getEl("formFileInput").addEventListener("change", (e) => {
-      if (e.target.files.length > 0) {
-        const file = e.target.files[0];
-        const reader = new FileReader();
-        reader.onload = (evt) => {
-          getEl("formImagePreview").src = evt.target.result;
-          getEl("formImagePreview").classList.remove("hidden");
-          getEl("formImagePlaceholder").classList.add("hidden");
-          getEl("formImageData").value = evt.target.result;
-        };
-        reader.readAsDataURL(file);
-      }
-    });
+  if (getEl("btnTriggerCameraPicker")) {
+    getEl("btnTriggerCameraPicker").addEventListener("click", () => getEl("formFileInputCamera")?.click());
   }
+  if (getEl("btnTriggerGalleryPicker")) {
+    getEl("btnTriggerGalleryPicker").addEventListener("click", () => getEl("formFileInputGallery")?.click());
+  }
+
+  const handlePhotoSelected = (e) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const file = e.target.files[0];
+      compressProductImage(file, (compressedBase64) => {
+        const preview = getEl("formImagePreview");
+        const placeholder = getEl("formImagePlaceholder");
+        const inputData = getEl("formImageData");
+
+        if (preview) {
+          preview.src = compressedBase64;
+          preview.classList.remove("hidden");
+        }
+        if (placeholder) placeholder.classList.add("hidden");
+        if (inputData) inputData.value = compressedBase64;
+      });
+    }
+  };
+
+  if (getEl("formFileInputCamera")) getEl("formFileInputCamera").addEventListener("change", handlePhotoSelected);
+  if (getEl("formFileInputGallery")) getEl("formFileInputGallery").addEventListener("change", handlePhotoSelected);
 
   if (getEl("formSellPrice")) getEl("formSellPrice").addEventListener("input", updateMarginCalculation);
   if (getEl("formBuyPrice")) getEl("formBuyPrice").addEventListener("input", updateMarginCalculation);
