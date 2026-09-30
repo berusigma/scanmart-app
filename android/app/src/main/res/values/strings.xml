@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Capacitor Starter</string>
-    <string name="title_activity_main">Capacitor Starter</string>
-    <string name="package_name">com.mysimplestart.app</string>
-    <string name="custom_url_scheme">com.mysimplestart.app</string>
+    <string name="app_name">ScanMart</string>
+    <string name="title_activity_main">ScanMart</string>
+    <string name="package_name">com.scanmart.app</string>
+    <string name="custom_url_scheme">com.scanmart.app</string>
 </resources>
