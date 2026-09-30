@@ -1,6 +1,6 @@
 /**
- * ScanMart — Core Application Logic (Capacitor 7 & Fail-Safe Offline Database)
- * Features: Fast Barcode Scanning, Offline DB, Anti-Duplicate, Kasir & Belanja, Receipt, Dark/Light Mode.
+ * ScanMart — Core Application Logic (Capacitor 7 & Fail-Safe Database)
+ * Features: Fast Barcode Scanning, Offline DB & Sync, Anti-Duplicate, Kasir & Belanja, Backup to Downloads Folder.
  */
 
 // ==================== 1. STATE & CONSTANTS ====================
@@ -63,7 +63,7 @@ function triggerHaptic() {
   } catch (e) {}
 }
 
-// ==================== 3. DATABASE ENGINE ====================
+// ==================== 3. DATABASE ENGINE (IDB + LOCALSTORAGE DUAL-SYNC) ====================
 function initDatabase() {
   return new Promise((resolve) => {
     try {
@@ -102,7 +102,7 @@ function initDatabase() {
   });
 }
 
-// LocalStorage Fallback Methods
+// LocalStorage Helper Methods
 function getLSProducts() {
   try {
     return JSON.parse(localStorage.getItem("scanmart_products_ls") || "[]");
@@ -116,46 +116,68 @@ function setLSProducts(list) {
 
 async function dbGetAllProducts() {
   if (dbInstance) {
-    return new Promise((resolve) => {
+    const idbProducts = await new Promise((resolve) => {
       try {
         const tx = dbInstance.transaction("products", "readonly");
         const store = tx.objectStore("products");
         const req = store.getAll();
         req.onsuccess = () => resolve(req.result || []);
-        req.onerror = () => resolve(getLSProducts());
-      } catch (e) { resolve(getLSProducts()); }
+        req.onerror = () => resolve([]);
+      } catch (e) { resolve([]); }
     });
+
+    if (idbProducts && idbProducts.length > 0) {
+      setLSProducts(idbProducts);
+      return idbProducts;
+    }
   }
   return getLSProducts();
 }
 
 async function dbGetProductByBarcode(barcode) {
   const products = await dbGetAllProducts();
-  return products.find(p => String(p.barcode) === String(barcode)) || null;
+  return products.find(p => String(p.barcode).trim() === String(barcode).trim()) || null;
 }
 
+// BULLETPROOF SAVE PRODUCT FIX
 async function dbSaveProduct(productData) {
   productData.updatedAt = new Date().toISOString();
+  
+  // Clean product object so `id` key is omitted when creating new items (critical for IndexedDB!)
+  const cleanProduct = { ...productData };
+  if (!cleanProduct.id) {
+    delete cleanProduct.id;
+  } else {
+    cleanProduct.id = Number(cleanProduct.id);
+  }
+
+  // Always sync to LocalStorage first as fail-safe
+  saveLSHelper(cleanProduct);
+
   if (dbInstance) {
     return new Promise((resolve) => {
       try {
         const tx = dbInstance.transaction("products", "readwrite");
         const store = tx.objectStore("products");
-        const req = productData.id ? store.put(productData) : store.add(productData);
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => {
-          saveLSHelper(productData);
-          resolve(true);
+        const req = cleanProduct.id ? store.put(cleanProduct) : store.add(cleanProduct);
+        req.onsuccess = (e) => {
+          if (!cleanProduct.id && e.target.result) {
+            cleanProduct.id = e.target.result;
+            saveLSHelper(cleanProduct);
+          }
+          resolve(cleanProduct);
+        };
+        req.onerror = (e) => {
+          console.warn("IndexedDB save error, using LS fallback:", e);
+          resolve(cleanProduct);
         };
       } catch (e) {
-        saveLSHelper(productData);
-        resolve(true);
+        console.warn("IndexedDB tx exception:", e);
+        resolve(cleanProduct);
       }
     });
-  } else {
-    saveLSHelper(productData);
-    return true;
   }
+  return cleanProduct;
 }
 
 function saveLSHelper(productData) {
@@ -215,12 +237,12 @@ async function dbClearScanHistory() {
   return true;
 }
 
-// Seed Sample Data (ONLY ONCE PER INSTALL, NEVER RE-SEED IF CLEARED BY USER)
+// Seed Sample Data (ONLY ONCE PER INSTALL)
 async function seedSampleDataIfNeeded(force = false) {
   const isAlreadySeeded = localStorage.getItem("scanmart_seeded_done") === "true";
   
   if (isAlreadySeeded && !force) {
-    return; // Don't auto-re-seed if user already cleared data or used the app!
+    return;
   }
 
   const products = await dbGetAllProducts();
@@ -774,12 +796,13 @@ function bindEventListeners() {
   if (getEl("formSellPrice")) getEl("formSellPrice").addEventListener("input", updateMarginCalculation);
   if (getEl("formBuyPrice")) getEl("formBuyPrice").addEventListener("input", updateMarginCalculation);
 
-  // Form Submission
+  // Form Submission (ROBUST ADD/EDIT PRODUCT)
   const pForm = getEl("productForm");
   if (pForm) {
     pForm.addEventListener("submit", async (e) => {
       e.preventDefault();
-      const id = getEl("formProductId").value ? Number(getEl("formProductId").value) : null;
+      const idVal = getEl("formProductId").value;
+      const id = idVal ? Number(idVal) : null;
       const barcode = getEl("formBarcode").value.trim();
       const name = getEl("formName").value.trim();
       const category = getEl("formCategory").value;
@@ -788,13 +811,14 @@ function bindEventListeners() {
       const stock = Number(getEl("formStock").value) || 0;
       const image = getEl("formImageData").value;
 
-      if (!barcode || !name || isNaN(sellPrice)) {
-        alert("Mohon lengkapi data barcode, nama, dan harga jual!");
+      if (!barcode || !name || isNaN(sellPrice) || sellPrice <= 0) {
+        alert("Mohon lengkapi data barcode, nama produk, dan harga jual yang valid!");
         return;
       }
 
+      // Check duplicate barcode
       const existing = await dbGetProductByBarcode(barcode);
-      if (existing && existing.id !== id) {
+      if (existing && Number(existing.id) !== Number(id)) {
         appState.duplicateProductTarget = existing;
         if (getEl("duplicateBarcodeNum")) getEl("duplicateBarcodeNum").textContent = barcode;
         if (getEl("duplicateProductName")) getEl("duplicateProductName").textContent = existing.name;
@@ -802,8 +826,12 @@ function bindEventListeners() {
         return;
       }
 
-      await dbSaveProduct({ id: id || undefined, barcode, name, category, sellPrice, buyPrice, stock, image });
+      const productObj = { barcode, name, category, sellPrice, buyPrice, stock, image };
+      if (id) productObj.id = id;
+
+      await dbSaveProduct(productObj);
       closeModal(getEl("modalProductForm"));
+      alert(id ? "✅ Produk berhasil diperbarui!" : "✅ Produk baru berhasil ditambahkan!");
       renderHomeView();
       renderCatalogView();
     });
@@ -831,6 +859,7 @@ function bindEventListeners() {
         await dbDeleteProduct(appState.targetDeleteId);
         closeModal(getEl("modalConfirmDelete"));
         closeModal(getEl("modalProductForm"));
+        alert("✅ Produk berhasil dihapus.");
         renderHomeView();
         renderCatalogView();
       }
@@ -994,27 +1023,82 @@ function bindEventListeners() {
       appState.storeProfile.address = getEl("settingStoreAddress")?.value.trim() || "";
       appState.storeProfile.footer = getEl("settingReceiptFooter")?.value.trim() || "";
       localStorage.setItem("scanmart_store", JSON.stringify(appState.storeProfile));
-      alert("Profil toko disimpan!");
+      alert("✅ Profil toko berhasil disimpan!");
       renderHomeView();
     });
   }
 
+  // EXPORT BACKUP DIRECTLY TO HP DOWNLOADS FOLDER
   if (getEl("btnExportData")) {
     getEl("btnExportData").addEventListener("click", async () => {
       const products = await dbGetAllProducts();
-      const backupData = { app: "ScanMart", version: "1.0.0", exportDate: new Date().toISOString(), products };
-      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData, null, 2));
-      const a = document.createElement("a");
-      a.href = dataStr;
-      a.download = `ScanMart_Backup.json`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      const backupData = {
+        app: "ScanMart",
+        version: "1.0.0",
+        exportDate: new Date().toISOString(),
+        storeProfile: appState.storeProfile,
+        products: products
+      };
+      
+      const dateStr = new Date().toISOString().slice(0, 10);
+      const fileName = `ScanMart_Backup_${dateStr}.json`;
+      const jsonString = JSON.stringify(backupData, null, 2);
+
+      // Check Capacitor Native Filesystem plugin
+      if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem) {
+        const { Filesystem } = window.Capacitor.Plugins;
+        try {
+          // Write to DOWNLOADS directory
+          await Filesystem.writeFile({
+            path: fileName,
+            data: jsonString,
+            directory: 'DOWNLOADS',
+            encoding: 'utf8'
+          });
+          alert(`✅ Backup Berhasil!\n\nFile telah tersimpan langsung di folder Download HP:\n${fileName}`);
+          return;
+        } catch (err1) {
+          try {
+            // Try DOCUMENTS directory fallback
+            await Filesystem.writeFile({
+              path: fileName,
+              data: jsonString,
+              directory: 'DOCUMENTS',
+              encoding: 'utf8'
+            });
+            alert(`✅ Backup Berhasil!\n\nFile telah tersimpan di folder Dokumen HP:\n${fileName}`);
+            return;
+          } catch (err2) {
+            downloadBrowserFallback(jsonString, fileName);
+          }
+        }
+      } else {
+        downloadBrowserFallback(jsonString, fileName);
+      }
     });
   }
 
+  function downloadBrowserFallback(jsonString, fileName) {
+    const blob = new Blob([jsonString], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 500);
+    alert(`✅ Backup Berhasil! File diproses untuk diunduh:\n${fileName}`);
+  }
+
+  // RESTORE BACKUP FROM JSON FILE
   if (getEl("btnRestoreData")) {
-    getEl("btnRestoreData").addEventListener("click", () => getEl("fileInputRestore")?.click());
+    getEl("btnRestoreData").addEventListener("click", () => {
+      const fileInput = getEl("fileInputRestore");
+      if (fileInput) {
+        fileInput.value = ""; // Clear selection
+        fileInput.click();
+      }
+    });
   }
 
   if (getEl("fileInputRestore")) {
@@ -1025,17 +1109,26 @@ function bindEventListeners() {
         reader.onload = async (evt) => {
           try {
             const parsed = JSON.parse(evt.target.result);
-            if (parsed && Array.isArray(parsed.products)) {
-              for (const item of parsed.products) {
-                delete item.id;
-                await dbSaveProduct(item);
+            const items = parsed.products || (Array.isArray(parsed) ? parsed : null);
+            if (items && Array.isArray(items)) {
+              let count = 0;
+              for (const item of items) {
+                delete item.id; // allow fresh auto-increment
+                if (item.name && item.barcode && item.sellPrice) {
+                  await dbSaveProduct(item);
+                  count++;
+                }
               }
               localStorage.setItem("scanmart_seeded_done", "true");
-              alert(`Berhasil mengimpor ${parsed.products.length} produk!`);
+              alert(`✅ Restore Berhasil!\n\nBerhasil memulihkan ${count} data produk ke toko Anda.`);
               renderHomeView();
               renderCatalogView();
+            } else {
+              alert("❌ Format file JSON tidak valid. Pastikan file adalah cadangan dari ScanMart.");
             }
-          } catch (err) { alert("File JSON tidak valid."); }
+          } catch (err) {
+            alert("❌ Gagal membaca file JSON backup.");
+          }
         };
         reader.readAsText(file);
       }
@@ -1044,8 +1137,8 @@ function bindEventListeners() {
 
   if (getEl("btnSeedSampleData")) {
     getEl("btnSeedSampleData").addEventListener("click", async () => {
-      await seedSampleDataIfNeeded(true); // force seed!
-      alert("Sampel data minimarket berhasil dimasukkan!");
+      await seedSampleDataIfNeeded(true);
+      alert("✅ Sampel data minimarket berhasil dimasukkan!");
       renderHomeView();
       renderCatalogView();
     });
@@ -1057,9 +1150,9 @@ function bindEventListeners() {
         const products = await dbGetAllProducts();
         for (const p of products) await dbDeleteProduct(p.id);
         await dbClearScanHistory();
-        localStorage.setItem("scanmart_products_ls", "[]"); // Clear LS backup too!
-        localStorage.setItem("scanmart_seeded_done", "true"); // Prevent auto re-seeding!
-        alert("Database berhasil dikosongkan.");
+        localStorage.setItem("scanmart_products_ls", "[]");
+        localStorage.setItem("scanmart_seeded_done", "true");
+        alert("✅ Database berhasil dikosongkan.");
         renderHomeView();
         renderCatalogView();
       }
@@ -1151,13 +1244,13 @@ async function initApp() {
   if (getEl("settingStoreAddress")) getEl("settingStoreAddress").value = appState.storeProfile.address || "";
   if (getEl("settingReceiptFooter")) getEl("settingReceiptFooter").value = appState.storeProfile.footer || "";
 
-  // Guaranteed Fail-Safe Timer: Dismiss Splash Screen after 1.2s max
+  // Fail-Safe Timer: Dismiss Splash Screen after 1.2s max
   setTimeout(() => {
     dismissSplashScreen();
     switchView("viewHome");
   }, 1200);
 
-  // Initialize DB asynchronously without blocking UI transition
+  // Initialize DB asynchronously
   try {
     await initDatabase();
     await seedSampleDataIfNeeded();
