@@ -43,9 +43,29 @@ function showToastBanner(message, type = "success") {
 }
 
 // ==================== 2. AUDIO & HAPTIC FEEDBACK ====================
+let scanAudio = new Audio("scan.mp3");
+scanAudio.preload = "auto";
 let audioCtx = null;
 
 function playBeepSound() {
+  try {
+    if (scanAudio) {
+      scanAudio.currentTime = 0;
+      const playPromise = scanAudio.play();
+      if (playPromise !== undefined) {
+        playPromise.catch(() => {
+          playSynthBeep();
+        });
+      }
+    } else {
+      playSynthBeep();
+    }
+  } catch (e) {
+    playSynthBeep();
+  }
+}
+
+function playSynthBeep() {
   try {
     if (!audioCtx) {
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
