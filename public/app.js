@@ -363,34 +363,21 @@ function applyTheme(theme) {
 }
 
 // ==================== 7. SCANNER ENGINE ====================
-async function startCameraScanner() {
+function startCameraScanner() {
   if (appState.isScanning) return;
   appState.isScanning = true;
+
+  // Set Cashier Continuous Scan Mode active by default
+  appState.cashierScanMode = true;
 
   // Manage cashier mode top status banner
   const cashierBanner = getEl("cashierScanBanner");
   if (cashierBanner) {
-    if (appState.cashierScanMode) {
-      cashierBanner.classList.remove("hidden");
-      const countEl = getEl("cashierItemCountText");
-      if (countEl) countEl.textContent = appState.cart.reduce((sum, item) => sum + item.qty, 0);
-    } else {
-      cashierBanner.classList.add("hidden");
-    }
+    cashierBanner.classList.remove("hidden");
+    const countEl = getEl("cashierItemCountText");
+    if (countEl) countEl.textContent = appState.cart.reduce((sum, item) => sum + item.qty, 0);
   }
 
-  // 1. Trigger explicit browser/WebView camera permission prompt
-  try {
-    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-      const initStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-      // Release temporary stream immediately so Html5Qrcode can claim the hardware
-      initStream.getTracks().forEach(track => track.stop());
-    }
-  } catch (errPerm) {
-    console.warn("Camera permission prompt error:", errPerm);
-  }
-
-  // 2. Initialize Html5Qrcode instance
   try {
     if (!appState.activeScanner && window.Html5Qrcode) {
       appState.activeScanner = new Html5Qrcode("html5QrcodeReader");
@@ -401,7 +388,7 @@ async function startCameraScanner() {
         fps: 20,
         qrbox: function(viewfinderWidth, viewfinderHeight) {
           const minDim = Math.min(viewfinderWidth, viewfinderHeight);
-          const boxSize = Math.floor(minDim * 0.75);
+          const boxSize = Math.floor(minDim * 0.85);
           return { width: boxSize, height: boxSize };
         },
         aspectRatio: 1.0,
@@ -410,35 +397,32 @@ async function startCameraScanner() {
         }
       };
 
-      // 3. Try opening camera by device ID (back camera) or environment facing mode
-      try {
-        const devices = await Html5Qrcode.getCameras();
-        if (devices && devices.length > 0) {
-          const backCam = devices.find(d => /back|rear|belakang|environment/i.test(d.label)) || devices[devices.length - 1];
-          await appState.activeScanner.start(
-            backCam.id,
-            config,
-            onBarcodeScannedSuccess,
-            () => {}
-          );
-          return;
-        }
-      } catch (errDev) {
-        console.warn("getCameras failed, using facingMode fallback:", errDev);
-      }
-
-      // Fallback: facingMode object
-      await appState.activeScanner.start(
+      // Direct start with facingMode environment
+      appState.activeScanner.start(
         { facingMode: "environment" },
         config,
         onBarcodeScannedSuccess,
         () => {}
-      );
+      ).catch(err1 => {
+        console.warn("First camera start catch, retrying after brief delay:", err1);
+        setTimeout(() => {
+          if (!appState.activeScanner) return;
+          appState.activeScanner.start(
+            { facingMode: "environment" },
+            { fps: 15, qrbox: { width: 220, height: 220 } },
+            onBarcodeScannedSuccess,
+            () => {}
+          ).catch(err2 => {
+            console.warn("Camera start retry error:", err2);
+            appState.isScanning = false;
+            alert("⚠️ Kamera belum dapat dibuka. Pastikan izin kamera telah disetujui pada Pengaturan HP Anda.");
+          });
+        }, 350);
+      });
     }
   } catch (e) {
     console.warn("Scanner exception:", e);
     appState.isScanning = false;
-    alert("⚠️ Kamera tidak dapat diakses. Pastikan Anda telah memberikan izin kamera pada aplikasi ScanMart di Pengaturan HP Anda.");
   }
 }
 

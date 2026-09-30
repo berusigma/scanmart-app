@@ -215,14 +215,28 @@
       <section id="viewScan" class="app-view hidden">
         <div class="scanner-page">
           
-          <!-- Top Cashier Continuous Scan Banner -->
-          <div id="cashierScanBanner" class="cashier-scan-banner hidden">
+          <div class="scanner-header">
+            <button class="btn-icon-back" id="btnBackFromScan" title="Kembali"><i class="fa-solid fa-arrow-left"></i></button>
+            <h3 class="scanner-title" id="scanPageTitle">Scan Barcode Kasir</h3>
+            <div class="scanner-actions">
+              <button class="scanner-tool-btn" id="btnToggleFlash" title="Senter">
+                <i class="fa-solid fa-bolt"></i>
+              </button>
+              <button class="scanner-tool-btn" id="btnGalleryScan" title="Scan dari Gambar Galeri">
+                <i class="fa-solid fa-image"></i>
+              </button>
+              <input type="file" id="fileInputGallery" accept="image/*" class="hidden" />
+            </div>
+          </div>
+
+          <!-- Top Cashier Continuous Scan Status Banner -->
+          <div id="cashierScanBanner" class="cashier-scan-banner">
             <div class="banner-content">
               <i class="fa-solid fa-cart-shopping text-neon-green"></i>
-              <span id="cashierScanStatusText">Mode Kasir: Scan barang ke Keranjang</span>
+              <span id="cashierScanStatusText">Mode Kasir (Auto Tambah)</span>
             </div>
-            <button class="btn-done-cashier-scan" id="btnDoneCashierScan">
-              <i class="fa-solid fa-check"></i> Selesai
+            <button class="btn-done-cashier-scan" id="btnFinishCashierScan">
+              <i class="fa-solid fa-check"></i> Selesai (<span id="cashierItemCountText">0</span>)
             </button>
           </div>
 
@@ -232,47 +246,25 @@
             <span id="scannerToastText">Item ditambahkan!</span>
           </div>
 
-          <div class="scanner-header">
-            <button class="btn-icon-back" id="btnBackFromScan" title="Kembali"><i class="fa-solid fa-arrow-left"></i></button>
-            <h3 class="scanner-title" id="scanPageTitle">Pindai Barcode</h3>
-            <div class="scanner-actions">
-              <button class="scanner-tool-btn" id="btnToggleFlash" title="Senter">
-                <i class="fa-solid fa-bolt"></i>
-              </button>
-              <button class="scanner-tool-btn" id="btnGalleryScan" title="Ambil Gambar dari Galeri">
-                <i class="fa-solid fa-image"></i>
-              </button>
-              <input type="file" id="fileInputGallery" accept="image/*" class="hidden" />
-            </div>
-          </div>
-
-          <!-- Live Camera Viewport -->
-          <div class="camera-viewport">
-            <div id="html5QrcodeReader"></div>
-            
-            <!-- Custom Laser Overlay with Central Viewfinder Box & Crosshair -->
-            <div class="scanner-overlay">
-              <div class="scanner-frame">
-                <div class="corner corner-tl"></div>
-                <div class="corner corner-tr"></div>
-                <div class="corner corner-bl"></div>
-                <div class="corner corner-br"></div>
+          <!-- Centered Rectangular Camera Box Container -->
+          <div class="camera-box-container">
+            <div class="camera-box-card">
+              <div id="html5QrcodeReader"></div>
+              
+              <!-- Custom Laser Overlay inside Camera Box -->
+              <div class="camera-box-overlay">
                 <div class="center-crosshair"></div>
                 <div class="laser-beam"></div>
               </div>
-              <p class="scanner-hint">Posisikan barcode di dalam kotak bidik</p>
             </div>
+            <p class="scanner-hint">Arahkan barcode tepat ke dalam kotak</p>
           </div>
 
           <!-- Bottom Control Bar -->
           <div class="scanner-controls">
-            <button class="btn-snap-photo" id="btnSnapProductFromCamera" title="Jepret foto produk & tambah tanpa barcode">
-              <i class="fa-solid fa-camera"></i>
-              <span>Foto Produk & Tambah</span>
-            </button>
             <button class="btn-manual-input" id="btnOpenManualScan" title="Ketik kode barcode manual">
               <i class="fa-solid fa-keyboard"></i>
-              <span>Ketik Kode</span>
+              <span>Ketik Kode Manual</span>
             </button>
           </div>
         </div>
