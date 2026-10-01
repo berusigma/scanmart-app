@@ -367,15 +367,21 @@ function startCameraScanner() {
   if (appState.isScanning) return;
   appState.isScanning = true;
 
-  // Set Cashier Continuous Scan Mode active by default
-  appState.cashierScanMode = true;
-
-  // Manage cashier mode top status banner
+  // Manage cashier vs add product mode banners
   const cashierBanner = getEl("cashierScanBanner");
-  if (cashierBanner) {
-    cashierBanner.classList.remove("hidden");
-    const countEl = getEl("cashierItemCountText");
-    if (countEl) countEl.textContent = appState.cart.reduce((sum, item) => sum + item.qty, 0);
+  const scanTitle = getEl("scanPageTitle");
+
+  if (appState.scanAddProductMode) {
+    if (cashierBanner) cashierBanner.classList.add("hidden");
+    if (scanTitle) scanTitle.textContent = "Scan Barcode Produk Baru";
+  } else {
+    appState.cashierScanMode = true;
+    if (scanTitle) scanTitle.textContent = "Scan Barcode Kasir";
+    if (cashierBanner) {
+      cashierBanner.classList.remove("hidden");
+      const countEl = getEl("cashierItemCountText");
+      if (countEl) countEl.textContent = appState.cart.reduce((sum, item) => sum + item.qty, 0);
+    }
   }
 
   try {
@@ -426,6 +432,12 @@ function startCameraScanner() {
   }
 }
 
+function startScanForAddProduct() {
+  appState.scanAddProductMode = true;
+  appState.cashierScanMode = false;
+  switchView("viewScan");
+}
+
 function stopCameraScanner() {
   appState.isScanning = false;
   if (appState.activeScanner) {
@@ -466,6 +478,20 @@ async function onBarcodeScannedSuccess(decodedText) {
   appState.scannedBarcode = decodedText;
   const product = await dbGetProductByBarcode(decodedText);
   await dbAddScanHistory(product);
+
+  // ADD PRODUCT SCAN MODE (Scan Barcode first to register new item)
+  if (appState.scanAddProductMode) {
+    appState.scanAddProductMode = false;
+    stopCameraScanner();
+
+    if (product) {
+      alert(`⚠️ Barcode ${decodedText} sudah terdaftar pada produk "${product.name}".`);
+      showProductDetailModal(product);
+    } else {
+      openProductForm({ barcode: decodedText });
+    }
+    return;
+  }
 
   // CASHIER CONTINUOUS MULTI-ITEM SCAN MODE
   if (appState.cashierScanMode) {
@@ -1384,14 +1410,14 @@ function bindEventListeners() {
   if (getEl("catalogSearchInput")) getEl("catalogSearchInput").addEventListener("input", renderCatalogView);
   if (getEl("catalogSortSelect")) getEl("catalogSortSelect").addEventListener("change", renderCatalogView);
 
-  // Menu Cards
+  // Menu Cards & Quick Action Buttons
   if (getEl("menuCardScan")) getEl("menuCardScan").onclick = () => switchView("viewScan");
   if (getEl("menuCardCashier")) getEl("menuCardCashier").onclick = () => openModal(getEl("modalCashierCart"));
-  if (getEl("menuCardAdd")) getEl("menuCardAdd").onclick = () => openProductForm();
+  if (getEl("menuCardAdd")) getEl("menuCardAdd").onclick = () => startScanForAddProduct();
   if (getEl("menuCardList")) getEl("menuCardList").onclick = () => switchView("viewProducts");
 
   if (getEl("btnNavScan")) getEl("btnNavScan").onclick = () => switchView("viewScan");
-  if (getEl("btnFabAddProduct")) getEl("btnFabAddProduct").onclick = () => openProductForm();
+  if (getEl("btnFabAddProduct")) getEl("btnFabAddProduct").onclick = () => startScanForAddProduct();
   if (getEl("btnSeeAllProducts")) getEl("btnSeeAllProducts").onclick = () => switchView("viewProducts");
   if (getEl("btnBackFromScan")) {
     getEl("btnBackFromScan").onclick = () => {

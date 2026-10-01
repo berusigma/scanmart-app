@@ -698,7 +698,6 @@ body {
   color: var(--text-dim);
 }
 
-/* 8. SCANNER VIEW & BANNERS (FIX STATUS BAR & CAMERA BLUR) */
 .scanner-page {
   position: fixed;
   inset: 0;
@@ -706,50 +705,41 @@ body {
   background: #000;
   display: flex;
   flex-direction: column;
-}
-
-/* Cashier Continuous Mode Top Banner */
-.cashier-scan-banner {
-  position: absolute;
-  top: calc(65px + var(--safe-top));
-  left: 16px;
-  right: 16px;
-  background: rgba(16, 185, 129, 0.25);
-  border: 1px solid #10b981;
-  backdrop-filter: blur(12px);
-  padding: 10px 16px;
-  border-radius: 16px;
-  display: flex;
   align-items: center;
   justify-content: space-between;
-  z-index: 600;
-  box-shadow: 0 4px 20px rgba(16, 185, 129, 0.4);
+  padding-top: calc(65px + var(--safe-top));
+  padding-bottom: calc(20px + var(--safe-bottom));
+  box-sizing: border-box;
 }
 
-.cashier-scan-banner .banner-content {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 13px;
-  font-weight: 700;
-  color: #fff;
+/* Floating Finish Cashier Scan Button on Top Right */
+.cashier-scan-banner {
+  position: absolute;
+  top: calc(72px + var(--safe-top));
+  right: 16px;
+  z-index: 600;
+  background: transparent;
+  border: none;
 }
 
 .btn-done-cashier-scan {
-  background: #10b981;
+  background: rgba(16, 185, 129, 0.95);
   color: #000;
-  border: none;
-  padding: 6px 14px;
+  border: 1px solid var(--neon-green);
+  padding: 8px 16px;
   border-radius: 20px;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 800;
   cursor: pointer;
+  box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4);
+  backdrop-filter: blur(12px);
 }
+.btn-done-cashier-scan:active { transform: scale(0.95); }
 
 /* Toast Floating Notification Banner */
 .scanner-toast-banner {
   position: absolute;
-  top: calc(120px + var(--safe-top));
+  top: calc(115px + var(--safe-top));
   left: 50%;
   transform: translateX(-50%);
   background: rgba(23, 32, 54, 0.95);
@@ -828,15 +818,16 @@ body {
   cursor: pointer;
 }
 
-/* 8. CENTERED RECTANGULAR CAMERA BOX CARD */
+/* 8. VERTICALLY CENTERED RECTANGULAR CAMERA BOX CARD */
 .camera-box-container {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  flex: 1;
   width: 100%;
-  padding: 12px 16px;
-  margin: 10px 0;
+  padding: 0 16px;
+  margin: auto 0;
   box-sizing: border-box;
 }
 
