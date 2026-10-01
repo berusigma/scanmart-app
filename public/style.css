@@ -839,7 +839,9 @@ body {
   width: 100% !important;
   height: 100% !important;
   object-fit: cover !important;
-  filter: contrast(1.05) sharpness(1.1);
+  image-rendering: -webkit-optimize-contrast;
+  transform: translateZ(0);
+  will-change: transform;
 }
 
 .scanner-overlay-fullscreen {

@@ -392,40 +392,42 @@ function startCameraScanner() {
     }
 
     if (appState.activeScanner) {
+      // High-Definition camera constraints (Full HD 1080p @ 30fps) for smooth crisp video
+      const hdConstraints = {
+        facingMode: "environment",
+        width: { ideal: 1920, min: 1280 },
+        height: { ideal: 1080, min: 720 },
+        frameRate: { ideal: 30, min: 24 }
+      };
+
       const config = {
-        fps: 20,
+        fps: 30,
         qrbox: function(viewfinderWidth, viewfinderHeight) {
           const minDim = Math.min(viewfinderWidth, viewfinderHeight);
-          const boxSize = Math.floor(minDim * 0.85);
-          return { width: boxSize, height: boxSize };
+          return { width: Math.floor(minDim * 0.85), height: Math.floor(minDim * 0.55) };
         },
-        aspectRatio: 1.0,
         experimentalFeatures: {
           useBarCodeDetectorIfSupported: true
         }
       };
 
-      // Direct start with facingMode environment
       appState.activeScanner.start(
-        { facingMode: "environment" },
+        hdConstraints,
         config,
         onBarcodeScannedSuccess,
         () => {}
       ).catch(err1 => {
-        console.warn("First camera start catch, retrying after brief delay:", err1);
-        setTimeout(() => {
-          if (!appState.activeScanner) return;
-          appState.activeScanner.start(
-            { facingMode: "environment" },
-            { fps: 15, qrbox: { width: 220, height: 220 } },
-            onBarcodeScannedSuccess,
-            () => {}
-          ).catch(err2 => {
-            console.warn("Camera start retry error:", err2);
-            appState.isScanning = false;
-            alert("⚠️ Kamera belum dapat dibuka. Pastikan izin kamera telah disetujui pada Pengaturan HP Anda.");
-          });
-        }, 350);
+        console.warn("HD camera start catch, retrying with fallback facingMode:", err1);
+        appState.activeScanner.start(
+          { facingMode: "environment" },
+          { fps: 20, qrbox: { width: 240, height: 160 } },
+          onBarcodeScannedSuccess,
+          () => {}
+        ).catch(err2 => {
+          console.warn("Camera start retry error:", err2);
+          appState.isScanning = false;
+          alert("⚠️ Kamera belum dapat dibuka. Pastikan izin kamera telah disetujui pada Pengaturan HP Anda.");
+        });
       });
     }
   } catch (e) {
