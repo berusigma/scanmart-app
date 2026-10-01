@@ -365,7 +365,7 @@ function applyTheme(theme) {
 }
 
 // ==================== 7. SCANNER ENGINE ====================
-function startCameraScanner() {
+async function startCameraScanner() {
   if (appState.isScanning) return;
   appState.isScanning = true;
 
@@ -392,16 +392,8 @@ function startCameraScanner() {
     }
 
     if (appState.activeScanner) {
-      // High-Definition camera constraints (Full HD 1080p @ 30fps) for smooth crisp video
-      const hdConstraints = {
-        facingMode: "environment",
-        width: { ideal: 1920, min: 1280 },
-        height: { ideal: 1080, min: 720 },
-        frameRate: { ideal: 30, min: 24 }
-      };
-
       const config = {
-        fps: 30,
+        fps: 25,
         qrbox: function(viewfinderWidth, viewfinderHeight) {
           const minDim = Math.min(viewfinderWidth, viewfinderHeight);
           return { width: Math.floor(minDim * 0.85), height: Math.floor(minDim * 0.55) };
@@ -411,28 +403,55 @@ function startCameraScanner() {
         }
       };
 
-      appState.activeScanner.start(
-        hdConstraints,
+      // 1. Primary Method: Open camera by physical device ID (back camera)
+      try {
+        const devices = await Html5Qrcode.getCameras();
+        if (devices && devices.length > 0) {
+          const backCam = devices.find(d => /back|rear|belakang|environment/i.test(d.label)) || devices[devices.length - 1];
+          await appState.activeScanner.start(
+            backCam.id,
+            config,
+            onBarcodeScannedSuccess,
+            () => {}
+          );
+          return;
+        }
+      } catch (errDev) {
+        console.warn("getCameras failed, attempting ideal HD constraints:", errDev);
+      }
+
+      // 2. Secondary Method: ideal HD resolution (no strict min bounds to prevent OverconstrainedError)
+      const hdIdealConstraints = {
+        facingMode: "environment",
+        width: { ideal: 1920 },
+        height: { ideal: 1080 }
+      };
+
+      await appState.activeScanner.start(
+        hdIdealConstraints,
         config,
         onBarcodeScannedSuccess,
         () => {}
-      ).catch(err1 => {
-        console.warn("HD camera start catch, retrying with fallback facingMode:", err1);
-        appState.activeScanner.start(
-          { facingMode: "environment" },
-          { fps: 20, qrbox: { width: 240, height: 160 } },
-          onBarcodeScannedSuccess,
-          () => {}
-        ).catch(err2 => {
-          console.warn("Camera start retry error:", err2);
-          appState.isScanning = false;
-          alert("⚠️ Kamera belum dapat dibuka. Pastikan izin kamera telah disetujui pada Pengaturan HP Anda.");
-        });
-      });
+      );
     }
   } catch (e) {
-    console.warn("Scanner exception:", e);
+    console.warn("Primary & Secondary camera start failed, attempting basic fallback:", e);
+    // 3. Tertiary Fail-Safe Fallback: Simple facingMode
+    try {
+      if (appState.activeScanner) {
+        await appState.activeScanner.start(
+          { facingMode: "environment" },
+          { fps: 15, qrbox: { width: 240, height: 160 } },
+          onBarcodeScannedSuccess,
+          () => {}
+        );
+        return;
+      }
+    } catch (fallbackErr) {
+      console.warn("All camera start attempts failed:", fallbackErr);
+    }
     appState.isScanning = false;
+    alert("⚠️ Kamera belum dapat dibuka. Pastikan izin kamera telah disetujui pada Pengaturan HP Anda.");
   }
 }
 
