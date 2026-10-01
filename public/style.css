@@ -818,55 +818,116 @@ body {
   cursor: pointer;
 }
 
-/* 8. VERTICALLY CENTERED RECTANGULAR CAMERA BOX CARD */
-.camera-box-container {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  flex: 1;
+/* 8. FULLSCREEN CAMERA VIEWPORT & CENTERED RECTANGULAR TARGET BOX */
+.camera-viewport-fullscreen {
+  position: absolute;
+  inset: 0;
   width: 100%;
-  padding: 0 16px;
-  margin: auto 0;
-  box-sizing: border-box;
-}
-
-.camera-box-card {
-  position: relative;
-  width: 100%;
-  max-width: 360px;
-  height: 250px;
+  height: 100%;
   background: #000;
-  border-radius: 20px;
-  border: 2px solid var(--neon-cyan);
-  box-shadow: 0 0 24px rgba(56, 189, 248, 0.35), inset 0 0 15px rgba(0, 0, 0, 0.8);
   overflow: hidden;
+  z-index: 100;
 }
 
-.camera-box-card #html5QrcodeReader {
+.camera-viewport-fullscreen #html5QrcodeReader {
   width: 100% !important;
   height: 100% !important;
   border: none !important;
 }
 
-.camera-box-card #html5QrcodeReader video {
+.camera-viewport-fullscreen #html5QrcodeReader video {
   width: 100% !important;
   height: 100% !important;
   object-fit: cover !important;
   filter: contrast(1.05) sharpness(1.1);
 }
 
-.camera-box-overlay {
+.scanner-overlay-fullscreen {
   position: absolute;
   inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   pointer-events: none;
+  z-index: 200;
+}
+
+/* Centered Rectangular Target Box with Box-Shadow Window Overlay */
+.scanner-target-box {
+  position: relative;
+  width: 290px;
+  height: 180px;
+  border-radius: 16px;
+  border: 2px solid var(--neon-cyan);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+  filter: drop-shadow(0 0 15px rgba(56, 189, 248, 0.5));
+}
+
+.corner {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  border-color: var(--neon-cyan);
+  border-style: solid;
+  filter: drop-shadow(0 0 8px var(--neon-cyan));
+}
+
+.corner-tl { top: -2px; left: -2px; border-width: 4px 0 0 4px; border-top-left-radius: 14px; }
+.corner-tr { top: -2px; right: -2px; border-width: 4px 4px 0 0; border-top-right-radius: 14px; }
+.corner-bl { bottom: -2px; left: -2px; border-width: 0 0 4px 4px; border-bottom-left-radius: 14px; }
+.corner-br { bottom: -2px; right: -2px; border-width: 0 4px 4px 0; border-bottom-right-radius: 14px; }
+
+/* Central Target Crosshair */
+.center-crosshair {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid rgba(56, 189, 248, 0.7);
+}
+.center-crosshair::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: -12px;
+  right: -12px;
+  height: 1px;
+  background: rgba(56, 189, 248, 0.5);
+}
+.center-crosshair::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -12px;
+  bottom: -12px;
+  width: 1px;
+  background: rgba(56, 189, 248, 0.5);
+}
+
+.laser-beam {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--neon-cyan);
+  box-shadow: 0 0 18px var(--neon-cyan);
+  animation: laserScan 2.2s infinite ease-in-out alternate;
 }
 
 .scanner-hint {
-  color: var(--text-muted);
-  font-size: 12px;
+  color: #fff;
+  font-size: 13px;
   font-weight: 600;
-  margin-top: 12px;
+  margin-top: 24px;
+  background: rgba(0, 0, 0, 0.65);
+  padding: 8px 20px;
+  border-radius: 30px;
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
   text-align: center;
 }
 

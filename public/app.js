@@ -22,7 +22,9 @@ let appState = {
   scannedBarcode: null,
   activeScanner: null,
   isScanning: false,
+  isFlashOn: false,
   cashierScanMode: false,
+  scanAddProductMode: false,
   lastScannedBarcode: null,
   lastScanTimestamp: 0,
   targetDeleteId: null,
@@ -435,11 +437,26 @@ function startCameraScanner() {
 function startScanForAddProduct() {
   appState.scanAddProductMode = true;
   appState.cashierScanMode = false;
-  switchView("viewScan");
+  if (appState.isScanning) {
+    stopCameraScanner();
+    setTimeout(() => {
+      switchView("viewScan");
+    }, 250);
+  } else {
+    switchView("viewScan");
+  }
 }
 
 function stopCameraScanner() {
   appState.isScanning = false;
+  appState.isFlashOn = false;
+  const flashBtn = getEl("btnToggleFlash");
+  if (flashBtn) {
+    flashBtn.classList.remove("active");
+    flashBtn.style.color = "#ffffff";
+    flashBtn.style.borderColor = "rgba(255, 255, 255, 0.3)";
+  }
+
   if (appState.activeScanner) {
     appState.activeScanner.stop().then(() => {
       releaseCameraTracks();
@@ -931,13 +948,24 @@ function bindEventListeners() {
     });
   }
 
-  // Flashlight & Gallery
+  // Flashlight ON / OFF Toggle
   if (getEl("btnToggleFlash")) {
     getEl("btnToggleFlash").addEventListener("click", () => {
       if (appState.activeScanner && appState.isScanning) {
-        appState.activeScanner.applyVideoConstraints({ advanced: [{ torch: true }] }).catch(() => {
+        appState.isFlashOn = !appState.isFlashOn;
+        appState.activeScanner.applyVideoConstraints({ advanced: [{ torch: appState.isFlashOn }] }).then(() => {
+          const btn = getEl("btnToggleFlash");
+          if (btn) {
+            btn.classList.toggle("active", appState.isFlashOn);
+            btn.style.color = appState.isFlashOn ? "#f59e0b" : "#ffffff";
+            btn.style.borderColor = appState.isFlashOn ? "#f59e0b" : "rgba(255, 255, 255, 0.3)";
+          }
+        }).catch(() => {
+          appState.isFlashOn = false;
           alert("Senter tidak didukung pada perangkat ini.");
         });
+      } else {
+        alert("Buka kamera terlebih dahulu untuk menyalakan senter.");
       }
     });
   }
@@ -1057,13 +1085,23 @@ function bindEventListeners() {
       }
 
       const productObj = { barcode, name, category, sellPrice, buyPrice, stock, image };
-      if (id) productObj.id = id;
-
       await dbSaveProduct(productObj);
       closeModal(getEl("modalProductForm"));
-      alert(id ? "✅ Produk berhasil diperbarui!" : "✅ Produk baru berhasil ditambahkan!");
+      
+      const wasAddingViaScan = appState.scanAddProductMode || (appState.currentView === "viewScan");
+
       renderHomeView();
       renderCatalogView();
+
+      if (!id && wasAddingViaScan) {
+        if (confirm("✅ Produk baru berhasil ditambahkan!\n\nIngin scan & tambah produk baru lainnya lagi?")) {
+          startScanForAddProduct();
+        } else {
+          switchView("viewHome");
+        }
+      } else {
+        alert(id ? "✅ Produk berhasil diperbarui!" : "✅ Produk baru berhasil ditambahkan!");
+      }
     });
   }
 

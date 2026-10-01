@@ -215,11 +215,30 @@
       <section id="viewScan" class="app-view hidden">
         <div class="scanner-page">
           
+          <!-- Fullscreen Live Camera Viewport -->
+          <div class="camera-viewport-fullscreen">
+            <div id="html5QrcodeReader"></div>
+            
+            <!-- Fullscreen Overlay with Centered Rectangular Target Box -->
+            <div class="scanner-overlay-fullscreen">
+              <div class="scanner-target-box">
+                <div class="corner corner-tl"></div>
+                <div class="corner corner-tr"></div>
+                <div class="corner corner-bl"></div>
+                <div class="corner corner-br"></div>
+                <div class="center-crosshair"></div>
+                <div class="laser-beam"></div>
+              </div>
+              <p class="scanner-hint">Arahkan barcode ke dalam kotak bidik</p>
+            </div>
+          </div>
+
+          <!-- Top Header Overlay -->
           <div class="scanner-header">
             <button class="btn-icon-back" id="btnBackFromScan" title="Kembali"><i class="fa-solid fa-arrow-left"></i></button>
             <h3 class="scanner-title" id="scanPageTitle">Scan Barcode Kasir</h3>
             <div class="scanner-actions">
-              <button class="scanner-tool-btn" id="btnToggleFlash" title="Senter">
+              <button class="scanner-tool-btn" id="btnToggleFlash" title="Senter Toggle ON/OFF">
                 <i class="fa-solid fa-bolt"></i>
               </button>
               <button class="scanner-tool-btn" id="btnGalleryScan" title="Scan dari Gambar Galeri">
@@ -240,20 +259,6 @@
           <div id="scannerToastBanner" class="scanner-toast-banner hidden">
             <i class="fa-solid fa-circle-check text-neon-green"></i>
             <span id="scannerToastText">Item ditambahkan!</span>
-          </div>
-
-          <!-- Centered Rectangular Camera Box Container -->
-          <div class="camera-box-container">
-            <div class="camera-box-card">
-              <div id="html5QrcodeReader"></div>
-              
-              <!-- Custom Laser Overlay inside Camera Box -->
-              <div class="camera-box-overlay">
-                <div class="center-crosshair"></div>
-                <div class="laser-beam"></div>
-              </div>
-            </div>
-            <p class="scanner-hint">Arahkan barcode tepat ke dalam kotak</p>
           </div>
 
           <!-- Bottom Control Bar -->
