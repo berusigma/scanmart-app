@@ -844,6 +844,13 @@ body {
   will-change: transform;
 }
 
+#html5QrcodeReader canvas,
+#html5QrcodeReader__scan_region {
+  display: none !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
 .scanner-overlay-fullscreen {
   position: absolute;
   inset: 0;
@@ -855,69 +862,35 @@ body {
   z-index: 200;
 }
 
-/* Centered Rectangular Target Box with Box-Shadow Window Overlay */
+/* Centered Rectangular Target Box - Clean White Corners Only, No Dark Overlay, No Blue Lines */
 .scanner-target-box {
   position: relative;
   width: 290px;
-  height: 180px;
-  border-radius: 16px;
-  border: 2px solid var(--neon-cyan);
-  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
-  filter: drop-shadow(0 0 15px rgba(56, 189, 248, 0.5));
+  height: 170px;
+  border-radius: 18px;
+  border: 1.5px solid rgba(255, 255, 255, 0.4);
+  box-shadow: none !important; /* Hilangkan bayangan gelap di sekitar kamera */
+  filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.3));
 }
 
 .corner {
   position: absolute;
   width: 28px;
   height: 28px;
-  border-color: var(--neon-cyan);
+  border-color: #ffffff !important; /* Sudut kamera warna putih bersih */
   border-style: solid;
-  filter: drop-shadow(0 0 8px var(--neon-cyan));
+  filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.9));
 }
 
-.corner-tl { top: -2px; left: -2px; border-width: 4px 0 0 4px; border-top-left-radius: 14px; }
-.corner-tr { top: -2px; right: -2px; border-width: 4px 4px 0 0; border-top-right-radius: 14px; }
-.corner-bl { bottom: -2px; left: -2px; border-width: 0 0 4px 4px; border-bottom-left-radius: 14px; }
-.corner-br { bottom: -2px; right: -2px; border-width: 0 4px 4px 0; border-bottom-right-radius: 14px; }
+.corner-tl { top: -2px; left: -2px; border-width: 4px 0 0 4px; border-top-left-radius: 16px; }
+.corner-tr { top: -2px; right: -2px; border-width: 4px 4px 0 0; border-top-right-radius: 16px; }
+.corner-bl { bottom: -2px; left: -2px; border-width: 0 0 4px 4px; border-bottom-left-radius: 16px; }
+.corner-br { bottom: -2px; right: -2px; border-width: 0 4px 4px 0; border-bottom-right-radius: 16px; }
 
-/* Central Target Crosshair */
-.center-crosshair {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  border: 2px solid rgba(56, 189, 248, 0.7);
-}
-.center-crosshair::before {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: -12px;
-  right: -12px;
-  height: 1px;
-  background: rgba(56, 189, 248, 0.5);
-}
-.center-crosshair::after {
-  content: '';
-  position: absolute;
-  left: 50%;
-  top: -12px;
-  bottom: -12px;
-  width: 1px;
-  background: rgba(56, 189, 248, 0.5);
-}
-
+/* Hilangkan laser biru dan crosshair biru */
+.center-crosshair,
 .laser-beam {
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 3px;
-  background: var(--neon-cyan);
-  box-shadow: 0 0 18px var(--neon-cyan);
-  animation: laserScan 2.2s infinite ease-in-out alternate;
+  display: none !important;
 }
 
 .scanner-hint {
@@ -925,11 +898,11 @@ body {
   font-size: 13px;
   font-weight: 600;
   margin-top: 24px;
-  background: rgba(0, 0, 0, 0.65);
+  background: rgba(0, 0, 0, 0.5);
   padding: 8px 20px;
   border-radius: 30px;
   backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.2);
   text-align: center;
 }
 
