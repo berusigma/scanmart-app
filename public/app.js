@@ -430,7 +430,7 @@ async function startCameraScanner() {
       // Lightweight & ultra-fast scanner config (10 FPS decode rate to save CPU & memory)
       const config = {
         fps: 10,
-        qrbox: { width: 270, height: 160 },
+        qrbox: { width: 280, height: 160 },
         experimentalFeatures: {
           useBarCodeDetectorIfSupported: true
         }
