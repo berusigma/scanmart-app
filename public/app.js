@@ -365,9 +365,40 @@ function applyTheme(theme) {
 }
 
 // ==================== 7. SCANNER ENGINE (LIGHTWEIGHT, FAST & FAIL-SAFE) ====================
+async function requestWebRTCCameraAccess() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    return true;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: "environment" } }
+    });
+    stream.getTracks().forEach(track => track.stop());
+    return true;
+  } catch (err) {
+    console.warn("requestWebRTCCameraAccess initial attempt failed:", err);
+    try {
+      const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true });
+      fallbackStream.getTracks().forEach(track => track.stop());
+      return true;
+    } catch (fallbackErr) {
+      console.error("requestWebRTCCameraAccess fallback failed:", fallbackErr);
+      return false;
+    }
+  }
+}
+
 async function startCameraScanner() {
   if (appState.isScanning) return;
   appState.isScanning = true;
+
+  // Verify/Prompt camera permissions via WebRTC
+  const hasCamAccess = await requestWebRTCCameraAccess();
+  if (!hasCamAccess) {
+    appState.isScanning = false;
+    alert("⚠️ Akses Kamera Ditolak\n\nAplikasi membutuhkan izin kamera untuk memindai barcode. Silakan izinkan akses kamera di Pengaturan HP (Pengaturan > Aplikasi > ScanMart > Izin Kamera).");
+    return;
+  }
 
   // Manage cashier vs add product mode banners
   const cashierBanner = getEl("cashierScanBanner");
