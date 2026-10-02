@@ -364,7 +364,7 @@ function applyTheme(theme) {
   localStorage.setItem("scanmart_theme", theme);
 }
 
-// ==================== 7. SCANNER ENGINE ====================
+// ==================== 7. SCANNER ENGINE (LIGHTWEIGHT, FAST & FAIL-SAFE) ====================
 async function startCameraScanner() {
   if (appState.isScanning) return;
   appState.isScanning = true;
@@ -386,18 +386,20 @@ async function startCameraScanner() {
     }
   }
 
+  // Ensure fresh HTML container element
+  const readerEl = getEl("html5QrcodeReader");
+  if (readerEl) readerEl.innerHTML = "";
+
   try {
-    if (!appState.activeScanner && window.Html5Qrcode) {
+    if (window.Html5Qrcode) {
       appState.activeScanner = new Html5Qrcode("html5QrcodeReader");
     }
 
     if (appState.activeScanner) {
+      // Lightweight & ultra-fast scanner config (10 FPS decode rate to save CPU & memory)
       const config = {
-        fps: 25,
-        qrbox: function(viewfinderWidth, viewfinderHeight) {
-          const minDim = Math.min(viewfinderWidth, viewfinderHeight);
-          return { width: Math.floor(minDim * 0.85), height: Math.floor(minDim * 0.55) };
-        },
+        fps: 10,
+        qrbox: { width: 270, height: 160 },
         experimentalFeatures: {
           useBarCodeDetectorIfSupported: true
         }
@@ -417,14 +419,14 @@ async function startCameraScanner() {
           return;
         }
       } catch (errDev) {
-        console.warn("getCameras failed, attempting ideal HD constraints:", errDev);
+        console.warn("getCameras failed, attempting ideal 720p constraints:", errDev);
       }
 
-      // 2. Secondary Method: ideal HD resolution (no strict min bounds to prevent OverconstrainedError)
+      // 2. Secondary Method: 720p HD resolution (ideal 1280x720, fast & sharp)
       const hdIdealConstraints = {
         facingMode: "environment",
-        width: { ideal: 1920 },
-        height: { ideal: 1080 }
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
       };
 
       await appState.activeScanner.start(
@@ -441,7 +443,7 @@ async function startCameraScanner() {
       if (appState.activeScanner) {
         await appState.activeScanner.start(
           { facingMode: "environment" },
-          { fps: 15, qrbox: { width: 240, height: 160 } },
+          { fps: 10, qrbox: { width: 240, height: 150 } },
           onBarcodeScannedSuccess,
           () => {}
         );
@@ -479,10 +481,14 @@ function stopCameraScanner() {
   }
 
   if (appState.activeScanner) {
-    appState.activeScanner.stop().then(() => {
+    const scannerRef = appState.activeScanner;
+    appState.activeScanner = null;
+    scannerRef.stop().then(() => {
       releaseCameraTracks();
+      try { scannerRef.clear(); } catch(e) {}
     }).catch(() => {
       releaseCameraTracks();
+      try { scannerRef.clear(); } catch(e) {}
     });
   } else {
     releaseCameraTracks();
@@ -498,6 +504,8 @@ function releaseCameraTracks() {
         v.srcObject = null;
       }
     });
+    const readerEl = getEl("html5QrcodeReader");
+    if (readerEl) readerEl.innerHTML = "";
   } catch (e) {}
 }
 
